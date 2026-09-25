@@ -1,0 +1,62 @@
+# application.yml — Spring Boot 配置文件
+# application.yml 保存基础运行配置。
+# Agent 行为提示词和工具调用轮数在 agent.xml 里配置。
+
+# agent 配置 —— 和 AgentProperties.java 对应
+# Jackson 自动把 yml 的横杠命名转成 Java 的驼峰命名
+# 例如：api-endpoint → apiEndpoint, api-key → apiKey
+agent:
+  # Claude API 的地址  - 换为 DeepSeek（Anthropic 兼容 API）
+  api-endpoint: https://api.deepseek.com/anthropic/v1/messages
+
+  # API 密钥（从环境变量读取，不硬编码）
+  # 已切换为 DeepSeek API Key
+  api-key: '${DEEPSEEK_API_KEY:}'
+
+  # 使用的模型名称 - 换为 DeepSeek Flash
+  model: deepseek-v4-flash[1m]
+
+  # 当前会话的上下文窗口上限，用来和 API 返回的 input_tokens 对比
+  context-window-limit-tokens: 150000
+
+  # workspace-dir 工作目录，工具只能访问这个目录下的文件
+  # PathValidator 用它来校验路径安全
+  workspace-dir: "./workspace"
+
+  # 压缩触发阈值。runningTotalTokens 超过此值时触发记忆压缩
+  compression-threshold-tokens: 100000
+
+  # 工具结果最大字符数。超过这个长度的工具输出会被截断
+  max-tool-result-chars: 4000
+
+
+# server 配置 —— Spring Boot 内置配置
+server:
+  # 监听端口
+  port: 8080
+
+# logging 日志配置 —— Spring Boot 内置
+logging:
+  file:
+    # Spring Boot 会把日志写到这个文件，PowerShell 可以用 Get-Content -Wait 实时查看
+    name: logs/spring.log
+
+  level:
+    # 我们自己项目的包，DEBUG 级别可以看到所有日志
+    com.example.ccagent: INFO
+    # controller 层打 INFO（只记录请求/响应）
+    com.example.ccagent.controller: INFO
+    # AnthropicClient 打 DEBUG（可以看到请求体细节）
+    com.example.ccagent.service: INFO
+
+
+spring:
+  datasource:
+    url: jdbc:sqlite:./workspace/data/session-backup.db
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+

@@ -1,0 +1,966 @@
+<html><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 2.2cm 2.5cm; }
+body { font-family: 'Microsoft YaHei', 'SimHei', sans-serif; font-size: 11pt; line-height: 1.8; color: #2d2d2d; }
+
+/* 标题 */
+h1 { font-size: 20pt; color: #1a1a2e; border-bottom: 3px solid #4169e1; padding-bottom: 6px; page-break-before: always; margin-top: 0; }
+h1:first-of-type { page-break-before: avoid; }
+h2 { font-size: 15pt; color: #2c3e50; border-left: 4px solid #4169e1; padding-left: 12px; margin-top: 30px; page-break-after: avoid; }
+h3 { font-size: 13pt; color: #34495e; margin-top: 22px; page-break-after: avoid; }
+
+/* 段落 */
+p { margin: 10px 0; text-align: justify; }
+
+/* 行内代码 */
+code { background: #f5f5f5; color: #c7254e; padding: 2px 6px; border-radius: 3px; font-size: 10pt; font-family: 'Consolas', 'Cascadia Code', monospace; }
+
+/* 代码块 */
+pre { background: #f8f8f8; color: #2d2d2d; border: 1px solid #e0e0e0; border-left: 4px solid #4169e1; padding: 14px 18px; border-radius: 4px; font-size: 9.5pt; line-height: 1.5; white-space: pre-wrap; word-break: break-all; page-break-inside: avoid; }
+
+/* 表格 */
+table { border-collapse: collapse; width: 100%; margin: 14px 0; page-break-inside: avoid; font-size: 10pt; }
+th, td { border: 1px solid #d0d0d0; padding: 10px 12px; text-align: left; }
+th { background: #4169e1; color: #ffffff; font-weight: 600; }
+tr:nth-child(even) { background: #f8f9fe; }
+tr:nth-child(odd) { background: #ffffff; }
+
+/* 引用 */
+blockquote { border-left: 4px solid #4169e1; margin: 12px 0; padding: 10px 18px; color: #555; background: #f0f4ff; border-radius: 0 4px 4px 0; }
+
+/* 列表 */
+ul, ol { padding-left: 24px; }
+li { margin: 4px 0; }
+
+/* 强调 */
+strong { color: #1a1a2e; }
+</style></head><body><h1>LangChain 架构文档（面向 C++ 开发者）</h1>
+<blockquote>
+<p>本文档基于 docs.langchain.com 官方文档编写。
+读者背景：1 年 C++ 后端开发（多线程、Linux、RPC/Thrift、protobuf、崩溃调试），
+Python 科研/脚本经验，正在学习 Java/Spring Boot，目标是留日求职。</p>
+<p><strong>更正：</strong> 之前错误地引用了 LangChain4j（社区 Java 移植版）作为参考。
+正确的参考源是 <a href="https://docs.langchain.com">docs.langchain.com</a>，LangChain 官方 Python 版。</p>
+</blockquote>
+<hr />
+<h2>前提：你已经知道的几个概念</h2>
+<p>如果你跟随之前的 <code>docs/java-learning-notes.md</code> 完成了学习，你已经理解了：</p>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>Java 术语</th>
+<th>C++ 类比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>程序入口</td>
+<td><code>public static void main(String[] args)</code></td>
+<td><code>int main(int argc, char* argv[])</code></td>
+</tr>
+<tr>
+<td>构建工具</td>
+<td>Gradle</td>
+<td>CMake</td>
+</tr>
+<tr>
+<td>包管理</td>
+<td>Maven Central</td>
+<td>vcpkg</td>
+</tr>
+<tr>
+<td>编译产物</td>
+<td>.class 字节码</td>
+<td>.o 目标文件</td>
+</tr>
+<tr>
+<td>运行时</td>
+<td>JVM</td>
+<td>OS 直接执行</td>
+</tr>
+<tr>
+<td>打包产物</td>
+<td>JAR 包</td>
+<td>.exe / .so</td>
+</tr>
+<tr>
+<td>框架</td>
+<td>Spring Boot</td>
+<td>（C++ 没有直接对应，是一个"管理所有对象的工厂"）</td>
+</tr>
+<tr>
+<td>对象管理</td>
+<td>Spring IoC 容器</td>
+<td>全局对象工厂（自动 new 和管理生命周期）</td>
+</tr>
+<tr>
+<td>依赖注入</td>
+<td><code>@Autowired</code></td>
+<td>连接容器里的实例到这个字段（传引用，不是拷贝）</td>
+</tr>
+<tr>
+<td>组件标记</td>
+<td><code>@Component</code> / <code>@Service</code></td>
+<td>标记"这个类需要 Spring 自动创建实例"</td>
+</tr>
+<tr>
+<td>HTTP 端点</td>
+<td><code>@RestController</code> + <code>@PostMapping</code></td>
+<td>注册 HTTP 路由处理函数</td>
+</tr>
+<tr>
+<td>日志框架</td>
+<td>SLF4J + Logback</td>
+<td>spdlog</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>一、LangChain4j 是什么</h2>
+<h3>一句话解释</h3>
+<p><strong>LangChain4j 是一个 Java 库，帮你省掉"手动写 Agent 循环"的代码。</strong></p>
+<h3>C++ 类比</h3>
+<p>你在 C++ 后端开发中用过 Thrift RPC——你只需要写 <code>.thrift</code> 文件定义接口，Thrift 编译器自动生成 client/server 桩代码，帮你处理序列化、网络传输、请求分发。你只关心业务逻辑。</p>
+<p><strong>LangChain 就是 Java 世界的"Thrift for LLM Agent"</strong>——它帮你处理：
+- 调用 LLM API（类似 Thrift 处理 RPC 编解码）
+- 管理对话历史（类似消息队列管理上下文）
+- 执行工具（类似 protobuf/JSON 反序列化 dispatch 到对应 handler）
+- 循环调度（类似生产者-消费者模型的调度循环）</p>
+<h3>对比</h3>
+<pre><code>你的 C++ RPC 服务：
+  客户端 → Thrift 自动处理 → 你的 handler → Thrift 返回响应
+
+Java LLM Agent（手动写）：
+  用户消息 → 手动循环（调 API → 解析 → 执行工具 → 循环） → 返回
+
+Java LLM Agent（用 LangChain 思想）：
+  用户消息 → Agent Executor（自动循环 + 工具 dispatch） → 返回
+</code></pre>
+<hr />
+<h2>二、当前项目（手动实现）存在的问题</h2>
+<h3>当前架构</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│  ChatController（HTTP 入口）                                  │
+│    ↓                                                        │
+│  AgentService（手动循环）                                     │
+│    ├── List&lt;Message&gt; history（手动管理对话历史）               │
+│    ├── for 循环（最多 10 轮）                                 │
+│    │   ├── AnthropicClient.chat(history)（发 HTTP 请求）      │
+│    │   ├── 解析 response.toolCalls()                         │
+│    │   ├── 如果有工具调用：ToolRegistry.execute()               │
+│    │   └── 如果无工具调用：返回 response.text()                │
+│    └── 返回结果                                               │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3>这段代码的问题（从 C++ 角度）</h3>
+<pre><code class="language-java">// AgentService.java — 手动循环
+for (int round = 0; round &lt; 10; round++) {
+    // 1. 调用 API（手动构建 JSON 请求体）
+    AnthropicClient.AnthropicResponse response = anthropicClient.chat(history);
+
+    // 2. 检查是否有工具调用（手动判断）
+    if (response.toolCalls().isEmpty()) {
+        return CompletableFuture.completedFuture(response.text());
+    }
+
+    // 3. 执行工具（手动 Dispatch）
+    for (ToolCall tc : response.toolCalls()) {
+        ToolResult result = toolRegistry.execute(tc.name(), tc.input());
+        history.add(new Message(&quot;user&quot;, &quot;工具结果: &quot; + result.content()));
+    }
+    // 循环回去...
+}
+</code></pre>
+<p><strong>类比：</strong> 这就像你在 C++ 里不依赖 Thrift 自动生成的桩代码，而是手写 socket 通信 + protobuf 序列化 + 手动 dispatch 每个 RPC 方法。虽然能工作，但多维护一个方法就多一份样板代码。</p>
+<ul>
+<li>每新增一个工具，要手动注册</li>
+<li>对话历史的清理/逐出要手动实现</li>
+<li>流式响应要手动解析 SSE 事件</li>
+<li>工具调用的参数验证要手动写</li>
+<li>错误恢复和重试要手动实现</li>
+</ul>
+<hr />
+<h2>三、LangChain4j 的解决方案</h2>
+<h3>核心思想：声明式替代命令式</h3>
+<pre><code class="language-java">// === 不用 LangChain4j（命令式：你说怎么做） ===
+// 你需要手动写：
+//   1. 构建 HTTP 请求
+//   2. 解析 JSON 响应
+//   3. 检查 tool_use
+//   4. 执行工具
+//   5. 循环
+for (int round = 0; round &lt; 10; round++) {
+    AnthropicClient.AnthropicResponse response = anthropicClient.chat(history);
+    if (response.toolCalls().isEmpty()) return response.text();
+    for (ToolCall tc : response.toolCalls()) {
+        ToolResult result = toolRegistry.execute(tc.name(), tc.input());
+        history.add(new Message(&quot;user&quot;, &quot;工具结果: &quot; + result.content()));
+    }
+}
+
+// === 用 LangChain4j（声明式：你说要什么结果） ===
+// 只需要定义一个接口，LangChain4j 自动完成上述全部工作
+@AiService
+public interface CcAgentAiService {
+    @SystemMessage(&quot;You are an AI coding assistant...&quot;)
+    String chat(String userMessage);  // ← 一行代码，自动处理循环
+}
+</code></pre>
+<h3>类比 C++</h3>
+<pre><code class="language-cpp">// 命令式（手动管理）：手写每个 RPC handler 的 dispatch 逻辑
+void process_request(const Request&amp; req) {
+    if (req.method == &quot;get_weather&quot;) {
+        handle_weather(parse_json(req.body));
+    } else if (req.method == &quot;search&quot;) {
+        handle_search(parse_json(req.body));
+    }
+    // 每加一个方法，要手动加 else if...
+}
+
+// 声明式（类比 LangChain 的思路，Thrift 自动生成）：
+// .thrift 文件只定义接口，编译器自动生成 dispatch 逻辑
+// service WeatherService {
+//     string get_weather(1: string city);
+//     string search(1: string query);
+// }
+</code></pre>
+<hr />
+<h2>四、LangChain4j 的核心组件</h2>
+<h3>组件图</h3>
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│                        LangChain4j 核心组件                        │
+│                                                                  │
+│  ┌────────────────┐    ┌──────────────┐    ┌──────────────────┐ │
+│  │   ChatModel    │    │ ChatMemory   │    │     @Tool        │ │
+│  │  （LLM 调用）    │    │ （对话记忆）    │    │  （工具定义）      │ │
+│  │                │    │              │    │                  │ │
+│  │ 负责：调用 LLM  │    │ 负责：存储和  │    │ 负责：定义可以  │ │
+│  │ API，发 HTTP   │    │ 管理对话历史   │    │ 被 LLM 调用的   │ │
+│  │ 请求          │    │ 自动逐出旧消息  │    │ 本地函数        │ │
+│  └───────┬────────┘    └──────┬───────┘    └────────┬─────────┘ │
+│          │                    │                      │           │
+│          └────────────────────┼──────────────────────┘           │
+│                               │                                  │
+│                    ┌──────────▼──────────┐                       │
+│                    │    AiServices       │                       │
+│                    │  （自动 Agent 循环）  │                       │
+│                    │                    │                       │
+│                    │ 把上面三个组件       │                       │
+│                    │ 组装成一个自动的     │                       │
+│                    │ Agent 循环          │                       │
+│                    └────────────────────┘                       │
+└──────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3>4.1 ChatModel — 调用 LLM API</h3>
+<p><strong>作用：</strong> 封装和 LLM 的 HTTP 通信，你不需要手动构建 JSON 请求。</p>
+<pre><code class="language-java">// 不用 LangChain4j（手动）：
+//   1. 构建 Map&lt;String, Object&gt; 请求体
+//   2. 用 HttpClient 发 HTTP POST
+//   3. 解析 JSON 响应
+//   4. 提取 text 和 tool_use
+//   → AnthropicClient.java 整个文件
+
+// 用 LangChain4j（自动配置）：
+//   ChatModel bean 由 Spring Boot 自动创建
+//   只需在 application.yml 里配置 key 和 model
+//   chatModel.chat(chatRequest) 一行调用
+</code></pre>
+<p><strong>类比：</strong> ChatModel 就像 Thrift 生成的 Client 桩——你只需要调用 <code>client.GetWeather(city)</code>，它自动处理序列化、网络传输，你不需要关心底层的 socket 通信和 protobuf 编码。</p>
+<h3>4.2 ChatMemory — 管理对话历史</h3>
+<p><strong>作用：</strong> 自动管理对话历史，支持逐出旧消息（超过 token 限制时自动删除最早的）。</p>
+<pre><code class="language-java">// 不用 LangChain4j（手动）：
+//   List&lt;Message&gt; history = new ArrayList&lt;&gt;();  // 手动创建列表
+//   history.add(new Message(&quot;user&quot;, message));  // 手动添加
+//   // 没有自动逐出机制，历史越长 token 越多
+
+// 用 LangChain4j（自动）：
+//   ChatMemoryProvider 自动创建和管理
+//   TokenWindowChatMemory 自动限制总 token 数
+//   每次对话自动维护历史
+</code></pre>
+<p><strong>类比：</strong> ChatMemory 就像你在 C++ 后端里用线程安全的生产者-消费者队列（有容量限制，满了自动丢弃旧数据），你只管往队列里 push，不需要关心内存管理。</p>
+<h3>4.3 @Tool 注解 — 定义可被 LLM 调用的函数</h3>
+<p><strong>作用：</strong> 用注解标记 Java 方法，让 LLM 可以调用。注解里的描述信息会被自动转换成 API 需要的 JSON Schema。</p>
+<pre><code class="language-java">// 不用 LangChain4j（手动定义工具）：
+@Component
+public class BashTool implements AgentTool {  // 实现接口
+    @Override public String getName() { return &quot;bash&quot;; }
+    @Override public String getDescription() { return &quot;执行 shell 命令&quot;; }
+    @Override public String execute(Map&lt;String, Object&gt; input) throws Exception {
+        String command = (String) input.get(&quot;command&quot;);  // 手动取参数
+        // ...
+    }
+}
+//   + 需要 AgentTool 接口
+//   + 需要 ToolRegistry 类来收集和 Dispatch
+//   + 需要手动从 Map 中取参数并类型转换
+//   + 需要手动编写 JSON Schema 给 LLM
+
+// 用 LangChain4j（注解驱动）：
+@Component
+public class BashTool {
+    @Tool(&quot;执行 shell 命令&quot;)
+    public String runCommand(@P(&quot;要执行的命令&quot;) String command) throws Exception {
+        // command 自动从 LLM 的参数中解析，类型安全
+        // ...
+    }
+}
+//   + 不需要接口
+//   + 不需要 ToolRegistry（@Tool 注解自动被发现）
+//   + 参数自动类型转换
+//   + JSON Schema 自动从方法签名生成
+</code></pre>
+<p><strong>类比 C++：</strong> @Tool 就像 RPC 框架里的接口定义（IDL）——你定义函数签名和注释，框架自动生成序列化/反序列化代码。</p>
+<table>
+<thead>
+<tr>
+<th>C++ 概念</th>
+<th>Java @Tool</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>gRPC 的 <code>.proto</code> 文件</td>
+<td>@Tool 注解</td>
+</tr>
+<tr>
+<td>protobuf 序列化</td>
+<td>自动 JSON Schema 生成</td>
+</tr>
+<tr>
+<td>gRPC stub</td>
+<td>AiServices 代理</td>
+</tr>
+</tbody>
+</table>
+<h3>4.4 AiServices — 自动 Agent 循环</h3>
+<p><strong>作用：</strong> 把 ChatModel + ChatMemory + @Tool 组装成一个自动的 Agent 循环。</p>
+<pre><code>AiServices 内部做的事情（自动的）：
+  1. 从 ChatMemory 加载历史
+  2. 构建 ChatRequest（系统提示词 + 历史 + 工具列表）
+  3. 调用 ChatModel
+  4. 如果响应包含 toolExecutionRequests：
+     → 执行对应的 @Tool 方法
+     → 添加 ToolExecutionResultMessage 到历史
+     → 回到步骤 2
+  5. 如果响应是纯文本：
+     → 保存到 ChatMemory
+     → 返回最终结果
+</code></pre>
+<p><strong>类比：</strong> AiServices 就像 Thrift 自动生成的 RPC Server 处理器——你只注册 handler 函数，它内部自动处理请求接收、反序列化、dispatch、错误恢复。你只需要关心"这个 RPC 收到什么参数、返回什么结果"。</p>
+<hr />
+<h2>五、新架构 vs 旧架构</h2>
+<h3>旧架构（手动）</h3>
+<pre><code>ChatController
+  └── AgentService（350 行手动循环代码）
+       ├── List&lt;Message&gt; history（手动管理）
+       ├── AnthropicClient（手动 HTTP 调用 + JSON 解析）
+       ├── ToolRegistry（手动工具注册 + Dispatch）
+       └── for (int round = 0; round &lt; 10; round++) { ... }
+</code></pre>
+<p><strong>需要手动维护的代码：</strong>
+- <code>AgentService.java</code> — 循环逻辑
+- <code>AnthropicClient.java</code> — HTTP 客户端
+- <code>ToolRegistry.java</code> — 工具注册表
+- <code>AgentTool.java</code> — 工具接口
+- <code>Message.java</code> — 消息模型
+- <code>ToolCall.java</code> — 工具调用模型
+- <code>ToolResult.java</code> — 工具结果模型</p>
+<h3>新架构（LangChain4j）</h3>
+<pre><code>ChatController
+  └── CcAgentAiService（@AiService 接口，10 行）
+       ├── ChatModel（自动配置，0 行代码）
+       ├── ChatMemory（自动管理，0 行代码）
+       └── @Tool 方法（修饰现有工具类，+3 行/工具）
+</code></pre>
+<p><strong>可以删除的代码：</strong>
+- <code>AgentService.java</code> — 删除（循环由 AiServices 自动完成）
+- <code>AnthropicClient.java</code> — 删除（ChatModel 自动配置）
+- <code>ToolRegistry.java</code> — 删除（@Tool 自动发现）
+- <code>AgentTool.java</code> — 删除（注解取代接口）
+- <code>Message.java</code> — 删除（LangChain4j 内置类型）
+- <code>ToolCall.java</code> — 删除（LangChain4j 内置类型）
+- <code>ToolResult.java</code> — 删除（LangChain4j 内置类型）</p>
+<hr />
+<h2>六、数据流详解</h2>
+<h3>6.1 完整数据流</h3>
+<pre><code>用户在浏览器/curl 输入：&quot;帮我读 main.java&quot;
+
+    ↓ HTTP GET /api/chat/v2?message=帮我读main.java
+
+ChatController.chatV2()
+    ↓ 调用
+@AiService 代理（Spring Boot 自动创建的）
+
+    ↓ 代理内部自动执行：
+
+1. ChatMemoryProvider.getMemory(sessionId)
+   └→ 返回 TokenWindowChatMemory（最多 8K tokens）
+
+2. 构建 ChatRequest：
+   ├── SystemMessage：&quot;You are an AI coding assistant...&quot;
+   ├── messages：...历史消息...
+   └── toolSpecifications：[bash, file_read, file_write]
+
+3. ChatModel.chat(request)
+   ↓ HTTP POST https://api.anthropic.com/v1/messages
+   └→ Claude 返回：tool_use(name=&quot;file_read&quot;, input={path: &quot;main.java&quot;})
+
+4. AI Service 检测到 toolExecutionRequests
+   └→ 找到 @Tool 方法：FileReadTool.readFile(path)
+   └→ 执行：readFile(&quot;main.java&quot;)
+   └→ 返回：文件内容字符串
+
+5. 添加 ToolExecutionResultMessage 到 ChatMemory
+
+6. 再次调用 ChatModel.chat(request)（带工具结果）
+   └→ Claude 返回：纯文本 &quot;文件内容是...&quot;
+
+7. 添加到 ChatMemory，返回结果给用户
+</code></pre>
+<h3>6.2 C++ 类比</h3>
+<pre><code>// C++ 类比（不是真实代码，帮助理解数据流）：
+struct Pipeline {
+    Memory* memory;     // 对话历史
+    ModelClient* model; // LLM 调用
+    ToolRegistry* tools;// 工具函数表
+};
+
+string run(string input) {
+    memory-&gt;add(UserMessage(input));
+
+    while (true) {
+        auto request = build_request(memory-&gt;get(), tools-&gt;schemas());
+        auto response = model-&gt;chat(request);
+
+        if (response.tool_calls.empty()) {
+            memory-&gt;add(AiMessage(response.text));
+            return response.text;
+        }
+
+        for (auto&amp; tc : response.tool_calls) {
+            auto result = tools-&gt;execute(tc.name, tc.input);
+            memory-&gt;add(ToolResultMessage(result));
+        }
+    }
+}
+</code></pre>
+<p>Pipeline 就是 LangChain4j 的 AiServices 内部实现。你不需要自己写这个循环。</p>
+<hr />
+<h2>七、新增的组件详解</h2>
+<h3>7.1 <code>@AiService</code> — 声明式接口</h3>
+<pre><code class="language-java">// 这个接口不需要实现类！
+// Spring Boot 启动时自动创建代理对象
+@AiService
+public interface CcAgentAiService {
+
+    // @SystemMessage = 系统提示词（类似 C++ 的 const string 配置）
+    // 每次调用 chat() 时自动注入到请求里
+    @SystemMessage(&quot;&quot;&quot;
+        You are an AI coding assistant running on the user's local machine.
+        You have access to tools for reading files, writing files,
+        and running shell commands.
+        &quot;&quot;&quot;)
+    String chat(String userMessage);
+
+
+    // chatStream = 流式版本，返回 TokenStream
+    // TokenStream 类似 protobuf 反序列化流，逐个字段解析，不等整条消息到齐
+    @SystemMessage(&quot;&quot;&quot;
+        You are an AI coding assistant running on the user's local machine.
+        &quot;&quot;&quot;)
+    TokenStream chatStream(String userMessage);
+}
+</code></pre>
+<p><strong>关键点：</strong>
+- 你不需要写实现类（不像 C++ 需要写 .cpp 实现 .h 声明的函数）
+- Spring 自动创建代理对象（类似 C++ 的动态代理/虚函数表，但是自动的）
+- 方法名和参数由你定义，返回值由 LangChain4j 决定（String 或 TokenStream）</p>
+<h3>7.2 <code>@Tool</code> — 可被 LLM 调用的函数</h3>
+<pre><code class="language-java">@Component  // 标记为 Spring 管理的组件
+public class BashTool {
+
+    // @Tool(&quot;描述&quot;) = 告诉 LLM 这个工具能做什么
+    // LLM 会看到：&quot;执行 shell 命令。例如：git status、ls、npm install 等。&quot;
+    @Tool(&quot;执行 shell 命令。例如：git status、ls、npm install 等。&quot;)
+    // @P(&quot;描述&quot;) = 参数的说明（帮助 LLM 理解参数含义）
+    // LLM 会看到参数描述：&quot;要执行的 shell 命令&quot;
+    public String runCommand(@P(&quot;要执行的 shell 命令&quot;) String command) throws Exception {
+        // command 的值由 LangChain4j 自动从 LLM 的 tool_use 参数中提取并类型转换
+        Process process = Runtime.getRuntime().exec(
+            new String[]{&quot;/bin/sh&quot;, &quot;-c&quot;, command});
+        String output = new String(process.getInputStream().readAllBytes());
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            String error = new String(process.getErrorStream().readAllBytes());
+            throw new RuntimeException(&quot;命令失败: &quot; + error);
+        }
+        return output;
+    }
+}
+</code></pre>
+<p><strong>LangChain4j 自动做的事情：</strong>
+1. 从方法签名生成 JSON Schema：<code>{"name":"runCommand","parameters":{"command":{"type":"string"}}}</code>
+2. 从 LLM 的 tool_use 参数中提取值：<code>{"command": "ls -la"}</code> → <code>command = "ls -la"</code>
+3. 自动调用 <code>runCommand("ls -la")</code>
+4. 把返回值包装成 <code>ToolExecutionResultMessage</code></p>
+<h3>7.3 <code>TokenStream</code> — 流式响应</h3>
+<pre><code class="language-java">// TokenStream 表示&quot;还在一直接受数据的流&quot;
+// 类比 C++：类似 std::future&lt;std::string&gt;，但是可以逐个收到结果
+TokenStream stream = service.chatStream(&quot;帮我读文件&quot;);
+
+// 注册回调：每收到一个 token 就调用
+stream.onPartialResponse(token -&gt; {
+    System.out.print(token);  // 实时输出到屏幕
+});
+
+// 注册完成回调
+stream.onCompleteResponse(fullText -&gt; {
+    System.out.println(&quot;\n完成！&quot;);
+});
+
+// 启动流式处理（非阻塞，后台线程处理）
+stream.start();
+</code></pre>
+<p><strong>类比 C++ RPC 异步处理：</strong></p>
+<pre><code class="language-cpp">// C++ RPC 异步回调模式
+rpc_client-&gt;call_async(&quot;get_weather&quot;, city, [](const Response&amp; resp) {
+    handle(resp);  // 每收到一个响应就处理
+});
+</code></pre>
+<hr />
+<h2>八、迁移路线图</h2>
+<h3>Phase 1：共存（新旧代码并行）</h3>
+<pre><code>build.gradle          ← 加两个 LangChain4j 依赖
+application.yml       ← 加 langchain4j 配置段
+BashTool.java         ← 加 @Tool 方法（保留原有代码）
+FileReadTool.java     ← 加 @Tool 方法
+FileWriteTool.java    ← 加 @Tool 方法
+CcAgentAiService.java ← 新建 @AiService 接口
+ChatController.java   ← 新增 /api/chat/v2 端点（旧端点保留）
+</code></pre>
+<h3>Phase 2：验证</h3>
+<pre><code>测试 /api/chat     ← 旧端点正常工作
+测试 /api/chat/v2  ← 新端点正常工作
+</code></pre>
+<h3>Phase 3：清理</h3>
+<pre><code>删除：AgentService.java、AnthropicClient.java、ToolRegistry.java
+删除：AgentTool.java、Message.java、ToolCall.java、ToolResult.java
+简化：AgentProperties.java（删除已迁移到 langchain4j 配置的字段）
+</code></pre>
+<h3>Phase 4：默认</h3>
+<pre><code>/api/chat 指向新实现，去掉 v2 后缀
+</code></pre>
+<hr />
+<h2>九、Java 概念速查表</h2>
+<table>
+<thead>
+<tr>
+<th>Java 概念</th>
+<th>代码</th>
+<th>C++ 类比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>接口</td>
+<td><code>interface Foo { void bar(); }</code></td>
+<td>纯虚类 <code>class Foo { virtual void bar() = 0; }</code></td>
+</tr>
+<tr>
+<td>注解</td>
+<td><code>@GetMapping("/api")</code></td>
+<td>编译期属性 <code>[[nodiscard]]</code></td>
+</tr>
+<tr>
+<td>方法签名</td>
+<td><code>String foo(int x)</code></td>
+<td><code>std::string foo(int x)</code></td>
+</tr>
+<tr>
+<td>泛型</td>
+<td><code>List&lt;String&gt;</code></td>
+<td><code>std::vector&lt;std::string&gt;</code></td>
+</tr>
+<tr>
+<td>Record</td>
+<td><code>record Point(int x, int y) {}</code></td>
+<td><code>struct Point { int x; int y; };</code>（自动生成 getter/hash/equals）</td>
+</tr>
+<tr>
+<td>Lambda</td>
+<td><code>x -&gt; x + 1</code></td>
+<td><code>[](int x) { return x + 1; }</code></td>
+</tr>
+<tr>
+<td>方法引用</td>
+<td><code>BashTool::runCommand</code></td>
+<td><code>&amp;BashTool::runCommand</code></td>
+</tr>
+<tr>
+<td>Stream API</td>
+<td><code>list.stream().filter(x -&gt; x &gt; 0)</code></td>
+<td><code>std::ranges::filter(list, [](int x) { return x &gt; 0; })</code></td>
+</tr>
+<tr>
+<td>CompletableFuture</td>
+<td><code>future.thenApply(x -&gt; x + 1)</code></td>
+<td><code>std::future</code> + callback（但 Java 的更好用）</td>
+</tr>
+<tr>
+<td>SseEmitter</td>
+<td><code>emitter.send("data")</code></td>
+<td>服务器端推送事件的句柄</td>
+</tr>
+<tr>
+<td>@Component</td>
+<td>标记类</td>
+<td>告诉 Spring："自动 new 这个类的实例"</td>
+</tr>
+<tr>
+<td>@Autowired</td>
+<td>标记字段</td>
+<td>告诉 Spring："把容器里的实例连接到这个字段"</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>十、LangChain v1 核心架构深度解析</h2>
+<blockquote>
+<p>基于 docs.langchain.com + OpenAI Cookbook 的真实实现。</p>
+</blockquote>
+<h3>10.1 架构总览：六个组件，一个循环</h3>
+<pre><code>                    ┌──────────────────────────────────────┐
+                    │          LangChain Agent 架构          │
+                    │                                      │
+ 用户输入 ──────────→│                                      ├──→ 最终输出
+                    │  ┌──────┐ ┌──────────┐ ┌──────────┐ │
+                    │  │Tool  │ │ Prompt   │ │ Output   │ │
+                    │  │工具   │ │ Template │ │ Parser   │ │
+                    │  │      │ │ 提示词模板 │ │ 输出解析 │ │
+                    │  └──┬───┘ └────┬─────┘ └────┬─────┘ │
+                    │     │          │              │      │
+                    │     │    ┌─────▼──────┐       │      │
+                    │     │    │  LLM Chain │       │      │
+                    │     │    │ LLM+Prompt │       │      │
+                    │     │    └─────┬──────┘       │      │
+                    │     │          │              │      │
+                    │     └────┐ ┌───▼────┐ ┌──────▼────┐ │
+                    │          │ │ Agent  │ │           │ │
+                    │          └─┤ 决策    ├─┘           │ │
+                    │            └───┬────┘              │ │
+                    │                │                    │ │
+                    │          ┌─────▼──────┐            │ │
+                    │          │   Agent    │            │ │
+                    │          │  Executor  │ ← 执行循环  │ │
+                    │          └────────────┘            │ │
+                    └──────────────────────────────────────┘
+</code></pre>
+<h3>10.2 六个组件的本质</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>组件</th>
+<th>本质</th>
+<th>C++ 类比</th>
+<th>在 LangChain v1 中的 API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Tool</strong></td>
+<td>被 LLM 调用的函数，带名称、描述、参数 schema</td>
+<td>函数指针 + 元数据 struct</td>
+<td><code>@tool</code> 装饰器或 <code>Tool(name, func, description)</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Prompt Template</strong></td>
+<td>控制 LLM 行为的提示词，定义"思考→行动→观察"格式</td>
+<td>格式化字符串 sprintf</td>
+<td><code>ChatPromptTemplate</code> 或字符串</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Output Parser</strong></td>
+<td>把 LLM 的文本输出解析成结构化数据（Action/Final Answer）</td>
+<td>正则解析器 + 状态机</td>
+<td>正则提取 <code>Action: xxx</code> / <code>Final Answer: xxx</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>LLM Chain</strong></td>
+<td>LLM + PromptTemplate 的组合，输入→LLM推理→输出</td>
+<td>带配置的推理引擎</td>
+<td><code>LLMChain(llm, prompt)</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Agent</strong></td>
+<td>组装 LLM Chain + Output Parser + Tools 的决策引擎</td>
+<td>决策状态机</td>
+<td><code>LLMSingleActionAgent(llm_chain, output_parser, tools)</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Agent Executor</strong></td>
+<td>运行"思考→行动→观察"循环的调度器</td>
+<td>事件循环 + 回调</td>
+<td><code>AgentExecutor.from_agent_and_tools()</code></td>
+</tr>
+</tbody>
+</table>
+<h3>10.3 从输入到输出的完整数据流</h3>
+<p>下面跟踪一条完整请求：用户问"加拿大有多少人口？"</p>
+<p><strong>进程/线程说明：</strong> LangChain 在 Python 中是单线程同步执行的。所有组件都在<strong>同一个进程、同一个线程</strong>中运行。但在 Java/Spring Boot 版本中，<code>@Async</code> 会让 AgentService 在单独的线程池线程中执行。</p>
+<pre><code>═══════════════════════════════════════════════════════════════════
+第 0 步：接收输入
+═══════════════════════════════════════════════════════════════════
+输入: &quot;How many people live in canada?&quot;
+
+进入: AgentExecutor.run(&quot;How many people live in canada?&quot;)
+线程: [主线程 / @Async 线程]
+═══════════════════════════════════════════════════════════════════
+
+第 1 步：AgentExecutor 调用 Agent（第 1 次）
+═══════════════════════════════════════════════════════════════════
+AgentExecutor 把输入传给 Agent
+
+  ┌─ Agent ─────────────────────────────────────────────┐
+  │  1a. 调用 PromptTemplate.format()                    │
+  │      输出:                                          │
+  │      &quot;&quot;&quot;                                            │
+  │      Answer the following questions...               │
+  │      You have access to: Search, Calculator          │
+  │      Question: How many people live in canada?       │
+  │      Thought:                                        │
+  │      &quot;&quot;&quot;                                            │
+  │                                                     │
+  │  1b. 调用 LLMChain.run(prompt)                       │
+  │        → ChatOpenAI 发 HTTP POST 到 OpenAI API       │
+  │        → 等待 HTTP 响应                             │
+  │        → LLM 输出:                                  │
+  │      &quot;&quot;&quot;                                            │
+  │      Thought: I need to search for Canada population │
+  │      Action: Search                                 │
+  │      Action Input: &quot;Canada population 2023&quot;          │
+  │      &quot;&quot;&quot;                                            │
+  │                                                     │
+  │  1c. 调用 OutputParser.parse(llm_output)             │
+  │        → 正则提取 &quot;Action: Search&quot;                  │
+  │        → 正则提取 &quot;Action Input: Canada pop...&quot;     │
+  │        → 返回 AgentAction(tool=&quot;Search&quot;,             │
+  │             input=&quot;Canada population 2023&quot;)          │
+  └─────────────────────────────────────────────────────┘
+
+Agent 返回: AgentAction(&quot;Search&quot;, &quot;Canada population 2023&quot;)
+═══════════════════════════════════════════════════════════════════
+
+第 2 步：AgentExecutor 执行 Tool
+═══════════════════════════════════════════════════════════════════
+AgentExecutor 看到 AgentAction（不是 Final Answer），执行工具
+
+  ┌─ Tool Execution ────────────────────────────────────┐
+  │  tools[&quot;Search&quot;].run(&quot;Canada population 2023&quot;)       │
+  │    → SerpAPI 发 HTTP 请求到 serpapi.com             │
+  │    → 等待 HTTP 响应                                 │
+  │    → 返回: &quot;39,566,248&quot;                             │
+  └─────────────────────────────────────────────────────┘
+
+Observation: &quot;39,566,248&quot;
+AgentExecutor 把 (AgentAction, Observation) 记入 intermediate_steps
+═══════════════════════════════════════════════════════════════════
+
+第 3 步：AgentExecutor 调用 Agent（第 2 次，带 Observation）
+═══════════════════════════════════════════════════════════════════
+AgentExecutor 把原问题 + intermediate_steps 传给 Agent
+
+  ┌─ Agent（第 2 轮）──────────────────────────────────┐
+  │  输入: Question + 之前的 Thought/Action/Observation │
+  │                                                     │
+  │  LLM 输出:                                          │
+  │  &quot;&quot;&quot;                                                │
+  │  Thought: I now know the answer                     │
+  │  Final Answer: The population of Canada as of       │
+  │    2023 is 38,664,637.                             │
+  │  &quot;&quot;&quot;                                                │
+  │                                                     │
+  │  OutputParser.parse(llm_output):                    │
+  │    → 检测到 &quot;Final Answer:&quot;                         │
+  │    → 返回 AgentFinish(output=&quot;38,664,637&quot;)          │
+  └─────────────────────────────────────────────────────┘
+
+Agent 返回: AgentFinish
+═══════════════════════════════════════════════════════════════════
+
+第 4 步：AgentExecutor 返回最终结果
+═══════════════════════════════════════════════════════════════════
+AgentExecutor 看到 AgentFinish，退出循环
+返回: &quot;The population of Canada as of 2023 is 38,664,637.&quot;
+═══════════════════════════════════════════════════════════════════
+</code></pre>
+<h3>10.4 线程/进程模型</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│              LangChain Agent 的线程模型                           │
+│                                                                 │
+│  Python 版本（单线程同步）：                                       │
+│                                                                 │
+│  Thread 1: ┌──────────────┐                                      │
+│            │ AgentExecutor │  ← 所有步骤都在同一个线程              │
+│            │   ├─ Agent.plan()     (同步，等待 LLM HTTP 响应)      │
+│            │   ├─ Tool.run()       (同步，等待工具 HTTP 响应)      │
+│            │   ├─ Agent.plan()     (同步)                         │
+│            │   └─ 返回结果                                       │
+│            └──────────────┘                                      │
+│                                                                 │
+│  特点：简单可靠，但 Agent Executor 阻塞在 I/O 等待上，浪费 CPU。     │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Java/Spring Boot 版本（多线程异步）：                              │
+│                                                                 │
+│  Tomcat 线程池:                                                  │
+│  Thread 1: ┬─ ChatController.chat()                              │
+│            │    └─ agentService.run(message)                     │
+│            │         └─ 返回 CompletableFuture（立即返回）         │
+│            └─ 线程释放，可以处理下一个请求                          │
+│                                                                 │
+│  @Async 线程池:                                                  │
+│  Thread 2: ┌──────────────┐                                      │
+│            │ Agent循环     │  ← Agent 循环在独立线程执行            │
+│            │   ├─ anthropicClient.chat() (阻塞等 HTTP)            │
+│            │   ├─ toolRegistry.execute()   (同步执行工具)          │
+│            │   ├─ anthropicClient.chat()   (阻塞等 HTTP)          │
+│            │   └─ CompletableFuture.complete(result)             │
+│            └──────────────┘                                      │
+│                                                                 │
+│  特点：Tomcat 线程不被 Agent 循环阻塞，可以处理更多并发请求。         │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3>10.5 LangChain v1 (<code>create_agent</code>) 的简化</h3>
+<p>LangChain 官方在 v1 版本中将上述六个组件简化为一个函数：</p>
+<pre><code class="language-python"># LangChain v1（docs.langchain.com 最新版）
+from langchain.agents import create_agent
+
+agent = create_agent(
+    model=&quot;claude-sonnet-4-6&quot;,        # LLM Chain 被内化为 model 参数
+    tools=[get_weather, calculator],   # Tools 直接传入
+    system_prompt=&quot;You are...&quot;,        # Prompt Template 被内化为 system_prompt
+)
+
+result = agent.invoke(
+    {&quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;What's the weather?&quot;}]}
+)
+</code></pre>
+<p><strong>简化了什么：</strong></p>
+<pre><code>旧版（显式，学习用）:                    新版（隐式，生产用）:
+                                      create_agent(model, tools, system_prompt)
+PromptTemplate + LLMChain + Agent       → model 参数（内部自动组装 LLM Chain）
+OutputParser                            → 内建，开发者看不到
+AgentExecutor（手动循环）                → agent.invoke() 内部自动循环
+</code></pre>
+<p><strong>但内部做的事情完全一样</strong> —— <code>create_agent</code> 内部仍然有 Output Parser 解析 LLM 输出、Agent Executor 循环调用工具。</p>
+<h3>10.6 对比表：LangChain vs 我们的 Java Agent</h3>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>LangChain (Python)</th>
+<th>我们的 Java Agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>接收输入</td>
+<td><code>agent_executor.run(input)</code></td>
+<td><code>ChatController.chat(request)</code></td>
+</tr>
+<tr>
+<td>组装提示词</td>
+<td><code>PromptTemplate.format()</code></td>
+<td>在 <code>AnthropicClient</code> 里手动构建 Map</td>
+</tr>
+<tr>
+<td>调用 LLM</td>
+<td><code>LLMChain.run(prompt)</code> → <code>ChatOpenAI</code></td>
+<td><code>AnthropicClient.chat(history)</code> → <code>HttpClient</code></td>
+</tr>
+<tr>
+<td>解析输出</td>
+<td><code>OutputParser.parse(llm_output)</code> → <code>AgentAction</code> / <code>AgentFinish</code></td>
+<td>手动解析 JSON <code>response.toolCalls()</code></td>
+</tr>
+<tr>
+<td>执行工具</td>
+<td><code>tool.run(action_input)</code></td>
+<td><code>ToolRegistry.execute(name, input)</code></td>
+</tr>
+<tr>
+<td>循环控制</td>
+<td><code>AgentExecutor._take_next_step()</code> 自动循环</td>
+<td><code>for (int round = 0; round &lt; 10; round++)</code></td>
+</tr>
+<tr>
+<td>返回结果</td>
+<td><code>AgentFinish.return_values["output"]</code></td>
+<td><code>CompletableFuture.completedFuture(text)</code></td>
+</tr>
+<tr>
+<td>记忆管理</td>
+<td><code>ConversationBufferWindowMemory(k=2)</code></td>
+<td><code>List&lt;Message&gt; history</code></td>
+</tr>
+<tr>
+<td>流式输出</td>
+<td><code>agent.stream()</code></td>
+<td><code>SseEmitter</code></td>
+</tr>
+</tbody>
+</table>
+<h3>10.7 C++ 开发者的理解要点</h3>
+<p><strong>1. LangChain 不是一个"服务"或"进程"，它是一个库（library）。</strong></p>
+<ul>
+<li>你安装 <code>pip install langchain</code>，然后在你的代码里 <code>import</code> 它</li>
+<li>它在你的进程里运行，和你的代码在同一线程</li>
+<li><strong>不是</strong> 一个单独的服务器或微服务</li>
+</ul>
+<p><strong>2. Agent 循环本质上是一个 while 循环。</strong></p>
+<pre><code class="language-cpp">// LangChain 的 Agent Executor 本质上就是这个 C++ 伪代码
+struct AgentResult {
+    bool is_final;
+    string output;
+    string action;
+    string action_input;
+};
+
+string run_agent(string input, vector&lt;Tool&gt;&amp; tools, LLM&amp; llm) {
+    vector&lt;pair&lt;AgentAction, string&gt;&gt; steps;
+
+    while (true) {
+        // 1. 组装提示词（PromptTemplate）
+        string prompt = format_prompt(input, tools, steps);
+
+        // 2. 调 LLM（LLMChain）
+        string llm_output = llm.chat(prompt);
+
+        // 3. 解析输出（OutputParser）
+        auto result = parse_output(llm_output);
+
+        if (result.is_final) {
+            return result.output;  // AgentFinish
+        }
+
+        // 4. 执行工具
+        string observation = tools[result.action].run(result.action_input);
+
+        // 5. 记录步骤
+        steps.push_back({result.action, observation});
+
+        // 6. 循环回去（带 Observation 的上下文）
+    }
+}
+</code></pre>
+<p><strong>3. <code>create_agent</code> v1 就是这个 while 循环的包装。</strong></p>
+<p>所有复杂的东西（Prompt Template、Output Parser、LLM Chain、Tool 执行）都被封装在 <code>create_agent()</code> 内部。你只需要传三个参数：模型、工具列表、系统提示词。</p></body></html>

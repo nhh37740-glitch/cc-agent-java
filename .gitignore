@@ -1,0 +1,22 @@
+# Build and local runtime output
+.gradle/
+build/
+data/
+gradle-project-cache/
+gradle-run-home/
+logs/
+workspace/
+
+# Bundled local JDK/installers
+jdk17/
+*.msi
+*.zip
+
+# Local IDE/config
+.idea/
+.vscode/
+*.iml
+
+# Secrets and local overrides
+.env
+application-local.yml

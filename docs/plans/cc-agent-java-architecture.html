@@ -1,0 +1,535 @@
+<html><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 2.2cm 2.5cm; }
+body { font-family: "Microsoft YaHei","SimHei",sans-serif; font-size: 11pt; line-height: 1.8; color: #2d2d2d; }
+h1 { font-size: 20pt; color: #1a1a2e; border-bottom: 3px solid #4169e1; padding-bottom: 6px; page-break-before: always; margin-top: 0; }
+h1:first-of-type { page-break-before: avoid; }
+h2 { font-size: 15pt; color: #2c3e50; border-left: 4px solid #4169e1; padding-left: 12px; margin-top: 30px; page-break-after: avoid; }
+h3 { font-size: 13pt; color: #34495e; margin-top: 22px; }
+p { margin: 10px 0; text-align: justify; }
+code { background: #f5f5f5; color: #c7254e; padding: 2px 6px; border-radius: 3px; font-size: 10pt; font-family: "Consolas",monospace; }
+pre { background: #f8f8f8; color: #2d2d2d; border: 1px solid #e0e0e0; border-left: 4px solid #4169e1; padding: 14px 18px; border-radius: 4px; font-size: 9.5pt; line-height: 1.5; white-space: pre-wrap; page-break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; margin: 14px 0; page-break-inside: avoid; font-size: 10pt; }
+th, td { border: 1px solid #d0d0d0; padding: 10px 12px; text-align: left; }
+th { background: #4169e1; color: #fff; font-weight: 600; }
+tr:nth-child(even) { background: #f8f9fe; }
+blockquote { border-left: 4px solid #4169e1; margin: 12px 0; padding: 10px 18px; color: #555; background: #f0f4ff; border-radius: 0 4px 4px 0; }
+strong { color: #1a1a2e; }
+</style></head><body><h1>cc-agent-java 架构文档</h1>
+<blockquote>
+<p>这是一个 Java Spring Boot 学习项目。通过构建一个能调用 Claude API、读写文件、执行命令的 Agent，来学习 Java 和 Spring Boot。
+对你来说，Java/Spring Boot 是全新的，所以这篇文档用最直白的方式解释每个组件。</p>
+</blockquote>
+<hr />
+<h2>一、这个项目做什么</h2>
+<p>用户通过 HTTP 请求发一条消息（比如"帮我读 main.java"），程序收到后：</p>
+<ol>
+<li>把消息发给 Claude API</li>
+<li>Claude 可能回复文本，也可能说"我需要读文件"（这叫 tool call）</li>
+<li>如果 Claude 要读文件，程序帮它读</li>
+<li>把文件内容发回给 Claude</li>
+<li>Claude 看完内容后回复最终答案</li>
+<li>把答案返回给用户</li>
+</ol>
+<pre><code>用户: &quot;帮我读 main.java&quot;
+  → 程序: 发给 Claude
+  → Claude: &quot;我要调用 file_read 工具&quot;
+  → 程序: 执行 file_read，读到文件内容
+  → 程序: 把文件内容发给 Claude
+  → Claude: &quot;文件内容是 XXX&quot;
+  → 程序: 返回给用户
+</code></pre>
+<hr />
+<h2>二、项目文件结构</h2>
+<pre><code>cc-agent-java/
+├── build.gradle                     ← 告诉 Gradle 怎么编译这个项目
+├── settings.gradle                  ← 项目名称
+├── run.bat                          ← 双击就能启动（不需要配环境变量）
+├── gradlew.bat                      ← Gradle Wrapper（不需要装 Gradle）
+├── jdk17/                           ← 项目自带的 JDK 17（不需要装 Java）
+│
+└── src/main/
+    ├── java/com/example/ccagent/
+    │   │
+    │   ├── CcAgentApplication.java        ← 程序入口（main 方法在这里）
+    │   │
+    │   ├── config/
+    │   │   └── AgentProperties.java       ← 配置文件映射（yml → Java 对象）
+    │   │
+    │   ├── model/                         ← 数据类（只存数据，没有逻辑）
+    │   │   ├── Message.java               ← 一条对话消息
+    │   │   ├── ToolCall.java              ← Claude 要调用工具时返回的数据
+    │   │   ├── ToolResult.java            ← 工具执行后的结果
+    │   │   └── ChatRequest.java           ← 用户发来的 HTTP 请求
+    │   │
+    │   ├── controller/
+    │   │   └── ChatController.java        ← HTTP 接口（接收请求，返回响应）
+    │   │
+    │   ├── service/
+    │   │   ├── AnthropicClient.java       ← 和 Claude API 通信
+    │   │   ├── ToolRegistry.java          ← 管理所有工具
+    │   │   └── AgentService.java          ← 核心循环（调 API + 执行工具）
+    │   │
+    │   └── tool/
+    │       ├── AgentTool.java             ← 工具接口（定义工具的契约）
+    │       ├── FileReadTool.java          ← 文件读取
+    │       ├── FileWriteTool.java         ← 文件写入
+    │       └── BashTool.java             ← 执行命令
+    │
+    └── resources/
+        └── application.yml                ← 配置文件（API 地址、密钥等）
+</code></pre>
+<hr />
+<h2>三、逐组件解释</h2>
+<h3>3.1 build.gradle — 项目怎么编译</h3>
+<pre><code class="language-groovy">plugins {
+    id 'java'                                    // 启用 Java 编译能力
+    id 'org.springframework.boot' version '3.2.0' // Spring Boot 插件
+    id 'io.spring.dependency-management' version '1.1.4' // 自动管理依赖版本
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // spring-boot-starter-web 包含了：
+    //   - Spring MVC（处理 HTTP 请求）
+    //   - Jackson（JSON 和 Java 对象的互转）
+    //   - Tomcat（内嵌的 Web 服务器，监听 8080 端口）
+}
+</code></pre>
+<p><strong>白话解释：</strong> 这个文件告诉 Gradle"我需要这些库，帮我去网上下载"。Gradle 会自动从 Maven Central（类似 App Store）下载所有需要的依赖。</p>
+<hr />
+<h3>3.2 CcAgentApplication.java — 程序的入口</h3>
+<pre><code class="language-java">@SpringBootApplication
+public class CcAgentApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(CcAgentApplication.class, args);
+    }
+}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li><code>main</code> 方法是 Java 程序的入口（和 C++ 的 <code>int main()</code> 一样）</li>
+<li><code>SpringApplication.run()</code> 启动 Spring Boot</li>
+<li>Spring Boot 启动后做了三件事：</li>
+<li>扫描当前目录下所有标记了 <code>@Component</code> 的类，创建它们的实例</li>
+<li>启动内嵌的 Tomcat Web 服务器（监听 8080 端口）</li>
+<li>注册所有 HTTP 接口（<code>@GetMapping</code>、<code>@PostMapping</code> 等）</li>
+</ul>
+<p><strong>类比：</strong> 你在 C++ 里启动一个 RPC 服务时，需要手动写 main 函数、创建 server、注册 handler、开始监听。Spring Boot 把这些都做了，你只需要标记哪些类需要被管理。</p>
+<hr />
+<h3>3.3 AgentProperties.java — 配置文件映射</h3>
+<pre><code class="language-java">@ConfigurationProperties(prefix = &quot;agent&quot;)
+public record AgentProperties(
+    String apiEndpoint,    // API 地址
+    String apiKey,         // API 密钥
+    String model,          // 模型名称
+    int maxToolRounds      // 最大工具调用轮数
+) {}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li><code>application.yml</code> 里写了 <code>agent.api-endpoint: https://api.anthropic.com/...</code></li>
+<li>Spring 自动把 yml 里的值映射到这个 Java 对象的字段</li>
+<li>yml 用横杠命名（<code>api-endpoint</code>），Java 用驼峰命名（<code>apiEndpoint</code>），Spring 自动转换</li>
+</ul>
+<p><strong>类比：</strong> 你在 C++ 里读 JSON 配置文件，需要手动解析 JSON、赋值给 struct 字段。Spring 帮你自动做了这件事。</p>
+<hr />
+<h3>3.4 model/ — 数据类</h3>
+<p><strong>Message.java</strong> — 一条对话消息：</p>
+<pre><code class="language-java">public record Message(String role, String content) {}
+// role = &quot;user&quot;（用户说的）或 &quot;assistant&quot;（AI 说的）
+// content = 消息内容
+</code></pre>
+<p><strong>ToolCall.java</strong> — Claude 要调用工具时返回的数据：</p>
+<pre><code class="language-java">public record ToolCall(String id, String name, Map&lt;String, Object&gt; input) {}
+// id = 这次调用的唯一 ID
+// name = 工具名称（如 &quot;file_read&quot;）
+// input = 工具参数（如 {&quot;path&quot;: &quot;main.java&quot;}）
+</code></pre>
+<p><strong>ToolResult.java</strong> — 工具执行后的结果：</p>
+<pre><code class="language-java">public record ToolResult(String toolCallId, String content, boolean isError) {}
+// toolCallId = 关联到哪个 ToolCall
+// content = 执行结果
+// isError = 是否失败
+</code></pre>
+<p><strong>ChatRequest.java</strong> — 用户发来的 HTTP 请求：</p>
+<pre><code class="language-java">public record ChatRequest(String message) {}
+// 用户发 POST /api/chat 时，请求体 JSON 自动转成这个对象
+// {&quot;message&quot;: &quot;帮我看 main.java&quot;} → ChatRequest(&quot;帮我看 main.java&quot;)
+</code></pre>
+<p><strong>白话解释：</strong> Record 是 Java 16+ 的"不可变数据类"。你定义一个 Record，编译器自动帮你生成构造函数、getter 方法、equals、hashCode、toString。比 C++ 的 struct 方便——C++ 需要自己写 <code>operator==</code> 和 <code>hash</code>。</p>
+<hr />
+<h3>3.5 ChatController.java — HTTP 接口</h3>
+<pre><code class="language-java">@RestController                     // 标记：这是一个 HTTP 控制器
+@RequestMapping(&quot;/api&quot;)             // 所有接口都以 /api 开头
+public class ChatController {
+
+    @Autowired                      // 自动注入 AgentService 实例
+    private AgentService agentService;
+
+    @PostMapping(&quot;/chat&quot;)          // 处理 POST /api/chat
+    public CompletableFuture&lt;Map&lt;String, String&gt;&gt; chat(
+            @RequestBody ChatRequest request) {
+
+        String userMessage = request.message();
+        return agentService.run(userMessage)
+            .thenApply(reply -&gt; Map.of(&quot;reply&quot;, reply));
+    }
+}
+</code></pre>
+<p><strong>白话解释（从请求到响应的完整流程）：</strong></p>
+<ol>
+<li>用户用 curl 或 Postman 发 <code>POST http://localhost:8080/api/chat</code></li>
+<li>请求体是 JSON：<code>{"message": "帮我看 main.java"}</code></li>
+<li>Tomcat 收到请求（它在 8080 端口监听）</li>
+<li>Tomcat 把请求转发给 Spring</li>
+<li>Spring 看到 <code>@PostMapping("/chat")</code>，知道要调用 <code>chat()</code> 方法</li>
+<li><code>@RequestBody</code> 把 JSON 请求体自动转成 <code>ChatRequest</code> 对象</li>
+<li><code>chat()</code> 方法调用 <code>agentService.run()</code>，传入用户消息</li>
+<li><code>agentService.run()</code> 是异步的（<code>@Async</code>），返回 <code>CompletableFuture</code></li>
+<li><code>thenApply</code> 等 <code>run()</code> 完成后把结果转成 <code>{"reply": "..."}</code> 格式</li>
+<li>Spring 把 Map 转成 JSON 返回给用户</li>
+</ol>
+<p><strong>类比：</strong> 你在 C++ 里用 Thrift 定义了一个 RPC 接口，Thrift 自动生成 server handler 的骨架代码。Spring 的 <code>@PostMapping</code> 就是类似的东西——你定义"哪个 URL 调哪个方法"，框架自动处理 HTTP、JSON 解析。</p>
+<hr />
+<h3>3.6 AgentService.java — 核心循环</h3>
+<pre><code class="language-java">@Service
+public class AgentService {
+
+    @Autowired private AnthropicClient anthropicClient;  // 和 Claude API 通信
+    @Autowired private ToolRegistry toolRegistry;         // 管理所有工具
+
+    @Async
+    public CompletableFuture&lt;String&gt; run(String userMessage) {
+        // 1. 创建对话历史
+        List&lt;Message&gt; history = new ArrayList&lt;&gt;();
+        history.add(new Message(&quot;user&quot;, userMessage));
+
+        // 2. 循环（最多 10 轮）
+        for (int round = 0; round &lt; 10; round++) {
+            // 3. 调 Claude API
+            AnthropicResponse response = anthropicClient.chat(history);
+
+            // 4. 如果没有工具调用，返回文本
+            if (response.toolCalls().isEmpty()) {
+                return CompletableFuture.completedFuture(response.text());
+            }
+
+            // 5. 执行每个工具
+            for (ToolCall tc : response.toolCalls()) {
+                ToolResult result = toolRegistry.execute(tc.name(), tc.input());
+                history.add(new Message(&quot;user&quot;, &quot;工具结果: &quot; + result.content()));
+            }
+        }
+        return CompletableFuture.completedFuture(&quot;超过最大轮数&quot;);
+    }
+}
+</code></pre>
+<p><strong>白话解释（这个循环做什么）：</strong></p>
+<ol>
+<li>把用户消息放入对话历史</li>
+<li>把历史发给 Claude API</li>
+<li>Claude 回复了两种可能：</li>
+<li>纯文本 → 结束，返回给用户</li>
+<li>要调工具 → 执行工具，把结果加入历史，回到第 2 步</li>
+<li>如果 Claude 一直要调工具，最多循环 10 次</li>
+</ol>
+<p><strong>为什么 <code>@Async</code>：</strong> 这个循环里调 Claude API 是慢的（要等网络响应）。如果不加 <code>@Async</code>，Tomcat 的请求线程会被阻塞，其他用户的请求要排队。加了 <code>@Async</code> 后，AgentService.run() 在另一个线程里跑，Tomcat 线程立即释放去处理下一个请求。</p>
+<hr />
+<h3>3.7 AnthropicClient.java — 调用 Claude API</h3>
+<pre><code class="language-java">@Component
+public class AnthropicClient {
+
+    @Autowired private AgentProperties properties;  // 配置（API 地址、密钥、模型）
+
+    public AnthropicResponse chat(List&lt;Message&gt; history) {
+        // 1. 构建请求体 JSON
+        Map&lt;String, Object&gt; body = new HashMap&lt;&gt;();
+        body.put(&quot;model&quot;, properties.model());
+        body.put(&quot;max_tokens&quot;, 4096);
+        body.put(&quot;messages&quot;, history.stream()
+            .map(m -&gt; Map.of(&quot;role&quot;, m.role(), &quot;content&quot;, m.content()))
+            .toList());
+
+        // 2. 发 HTTP POST 请求到 Claude API
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(properties.apiEndpoint()))
+            .header(&quot;x-api-key&quot;, properties.apiKey())
+            .POST(HttpRequest.BodyPublishers.ofString(toJson(body)))
+            .build();
+
+        HttpResponse&lt;String&gt; response = httpClient.send(request, ...);
+
+        // 3. 解析响应 JSON
+        // 提取 text（纯文本）和 tool_use（工具调用）
+        return new AnthropicResponse(text, toolCalls);
+    }
+}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li>这个类做的事情和你用 Python 调 OpenAI API 一样：构建 JSON 请求体 → 发 HTTP → 解析 JSON 响应</li>
+<li>用 Java 内置的 <code>HttpClient</code>（不需要引入额外的 HTTP 库）</li>
+<li>用 Jackson 做 JSON 和 Java 对象的互转</li>
+</ul>
+<p><strong>类比：</strong> 你在 C++ 里发 protobuf 请求到 RPC 服务端——你需要构建 protobuf 消息、序列化、发出去、收到响应后反序列化。<code>AnthropicClient</code> 做的就是这样的事情，只是格式是 JSON 而不是 protobuf。</p>
+<hr />
+<h3>3.8 ToolRegistry.java — 管理所有工具</h3>
+<pre><code class="language-java">@Component
+public class ToolRegistry {
+
+    private final Map&lt;String, AgentTool&gt; tools;
+
+    @Autowired
+    public ToolRegistry(List&lt;AgentTool&gt; toolList) {
+        // Spring 自动把所有实现了 AgentTool 接口的类的实例注入到这个 List 里
+        // FileReadTool、FileWriteTool、BashTool 都会在里面
+        this.tools = toolList.stream()
+            .collect(Collectors.toMap(AgentTool::getName, t -&gt; t));
+    }
+
+    public ToolResult execute(String name, Map&lt;String, Object&gt; input) {
+        AgentTool tool = tools.get(name);  // 按名字查找工具
+        if (tool == null) return error(&quot;工具不存在&quot;);
+        try {
+            return new ToolResult(name, tool.execute(input), false);
+        } catch (Exception e) {
+            return new ToolResult(name, e.getMessage(), true);
+        }
+    }
+}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li>构造函数参数是 <code>List&lt;AgentTool&gt; toolList</code></li>
+<li>Spring 会自动找到所有实现了 <code>AgentTool</code> 接口的类（<code>FileReadTool</code>、<code>FileWriteTool</code>、<code>BashTool</code>），把它们的实例放到这个 List 里，传给构造函数</li>
+<li>构造函数把这些工具放到一个 Map 里（key=工具名，value=工具实例）</li>
+<li><code>execute()</code> 方法按名字查找工具并执行</li>
+</ul>
+<p><strong>类比：</strong> 你在 C++ 里可能有一个 <code>std::map&lt;std::string, std::function&lt;...&gt;&gt;</code> 来 dispatch 不同的 RPC 方法。<code>ToolRegistry</code> 做的就是这件事——按名字找到对应的处理函数并调用。</p>
+<hr />
+<h3>3.9 AgentTool.java — 工具接口</h3>
+<pre><code class="language-java">public interface AgentTool {
+    String getName();           // 工具名称
+    String getDescription();    // 工具描述
+    String execute(Map&lt;String, Object&gt; input) throws Exception;  // 执行
+}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li><code>interface</code> 在 Java 里类似于 C++ 的纯虚类——定义了一组方法签名，任何实现了这个接口的类都必须实现这些方法</li>
+<li>所有工具（FileReadTool、FileWriteTool、BashTool）都实现这个接口</li>
+<li>这样 ToolRegistry 不需要知道具体是哪个工具，只需要知道它实现了 AgentTool，就能调用它的 execute() 方法</li>
+</ul>
+<hr />
+<h3>3.10 FileReadTool.java — 文件读取</h3>
+<pre><code class="language-java">@Component
+public class FileReadTool implements AgentTool {
+    @Override public String getName() { return &quot;file_read&quot;; }
+    @Override public String getDescription() { return &quot;读取文件内容&quot;; }
+
+    @Override public String execute(Map&lt;String, Object&gt; input) throws Exception {
+        String path = (String) input.get(&quot;path&quot;);
+        return Files.readString(Path.of(path));
+    }
+}
+</code></pre>
+<p><strong>白话解释：</strong></p>
+<ul>
+<li><code>@Component</code> — 告诉 Spring："自动创建这个类的实例"</li>
+<li><code>implements AgentTool</code> — 必须实现 getName、getDescription、execute 三个方法</li>
+<li><code>@Override</code> — 标记这是实现接口的，如果方法名写错编译器会报错</li>
+<li><code>execute()</code> — 从参数中取出文件路径，读取文件内容并返回</li>
+</ul>
+<hr />
+<h3>3.11 FileWriteTool.java — 文件写入</h3>
+<p>同 FileReadTool，只是 <code>execute()</code> 里是 <code>Files.writeString()</code>。</p>
+<hr />
+<h3>3.12 BashTool.java — 执行命令</h3>
+<pre><code class="language-java">@Component
+public class BashTool implements AgentTool {
+    @Override public String getName() { return &quot;bash&quot;; }
+    @Override public String getDescription() { return &quot;执行 shell 命令&quot;; }
+
+    @Override public String execute(Map&lt;String, Object&gt; input) throws Exception {
+        String command = (String) input.get(&quot;command&quot;);
+        // Runtime.getRuntime().exec() = 执行系统命令
+        // 你在 C++ 里可能用过 system() 或 popen()
+        // 这里用 Java 的等价版本
+        Process process = Runtime.getRuntime().exec(
+            new String[]{&quot;/bin/sh&quot;, &quot;-c&quot;, command});
+        String output = new String(process.getInputStream().readAllBytes());
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new RuntimeException(&quot;命令失败 (退出码 &quot; + exitCode + &quot;)&quot;);
+        }
+        return output;
+    }
+}
+</code></pre>
+<hr />
+<h3>3.13 application.yml — 配置文件</h3>
+<pre><code class="language-yaml">agent:
+  api-endpoint: https://api.anthropic.com/v1/messages
+  api-key: ${ANTHROPIC_API_KEY}         # 从环境变量读取，不写死密钥
+  model: claude-sonnet-4-20250514
+  max-tool-rounds: 10
+
+server:
+  port: 8080                            # Tomcat 监听这个端口
+</code></pre>
+<hr />
+<h2>四、从请求到响应的完整链路</h2>
+<p>下面跟踪一个完整请求："帮我看 main.java"。</p>
+<pre><code>1. 用户发请求
+   POST http://localhost:8080/api/chat
+   Body: {&quot;message&quot;: &quot;帮我看 main.java&quot;}
+
+2. Tomcat 收到请求（它在 8080 端口监听）
+   → 转发给 Spring
+
+3. Spring 匹配路由
+   @PostMapping(&quot;/chat&quot;) → 调用 ChatController.chat()
+
+4. ChatController.chat()
+   → 从请求体取出 message
+   → 调用 agentService.run(&quot;帮我看 main.java&quot;)
+   → 返回 CompletableFuture（异步）
+
+5. AgentService.run() [在独立线程执行]
+   → 创建 history = [Message(&quot;user&quot;, &quot;帮我看 main.java&quot;)]
+   → 第 1 轮:
+       → anthropicClient.chat(history)
+       → 发 HTTP POST 到 Claude API
+       → Claude 回复: tool_use(name=&quot;file_read&quot;, input={path: &quot;main.java&quot;})
+       → toolCalls 不为空
+       → toolRegistry.execute(&quot;file_read&quot;, {path: &quot;main.java&quot;})
+       → FileReadTool 读取文件，返回内容
+       → history 加入工具结果
+   → 第 2 轮:
+       → anthropicClient.chat(history)  // 这次 history 包含了文件内容
+       → Claude 回复: &quot;文件内容是 public class Main { ... }&quot;
+       → toolCalls 为空
+       → 返回 &quot;文件内容是 public class Main { ... }&quot;
+
+6. ChatController.thenApply()
+   → 收到结果
+   → 转成 {&quot;reply&quot;: &quot;文件内容是...&quot;}
+
+7. 返回给用户
+</code></pre>
+<hr />
+<h2>五、Spring Boot 的关键概念</h2>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>白话解释</th>
+<th>C++ 类比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@Component</code></td>
+<td>标记"这个类需要 Spring 自动创建实例"</td>
+<td>告诉工厂"这个东西需要生产"</td>
+</tr>
+<tr>
+<td><code>@Service</code></td>
+<td>和 @Component 一样，语义上表示"业务逻辑类"</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>@RestController</code></td>
+<td>和 @Component 一样，语义上表示"HTTP 控制器"</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>@Autowired</code></td>
+<td>把 Spring 容器里的实例连接到这个字段（传引用）</td>
+<td>工厂把生产好的零件装配到这个位置</td>
+</tr>
+<tr>
+<td><code>@PostMapping("/chat")</code></td>
+<td>当用户 POST 请求到 /api/chat 时，调用这个方法</td>
+<td>注册 RPC 路由</td>
+</tr>
+<tr>
+<td><code>@RequestBody</code></td>
+<td>把 HTTP 请求体 JSON 自动转成 Java 对象</td>
+<td>JSON 反序列化</td>
+</tr>
+<tr>
+<td><code>@Async</code></td>
+<td>这个方法在独立线程执行，不阻塞调用者</td>
+<td><code>std::async</code></td>
+</tr>
+<tr>
+<td>Record</td>
+<td>不可变数据类，编译器自动生成 getter/equals/hashCode</td>
+<td><code>struct</code> + 自动生成运算符</td>
+</tr>
+<tr>
+<td><code>List&lt;AgentTool&gt;</code> 作为参数</td>
+<td>Spring 自动把所有 AgentTool 实现类的实例注入</td>
+<td>自动收集所有 handler</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>六、为什么这样设计</h2>
+<h3>6.1 为什么 Agent 循环是 for 而不是 while</h3>
+<p>用 <code>for (int round = 0; round &lt; 10; round++)</code> 而不是 <code>while(true)</code>，因为：
+- 防止无限循环（如果 Claude 一直要调工具）
+- 10 是安全上限</p>
+<h3>6.2 为什么 AgentService 要 @Async</h3>
+<p>这个循环里调 Claude API 可能慢（网络延迟、大文件处理）。如果不加 <code>@Async</code>：
+- Tomcat 线程会被阻塞
+- 其他用户的请求要排队等待
+- 多个用户同时使用时体验很差</p>
+<p>加了 <code>@Async</code> 后，AgentService.run() 在独立线程跑，Tomcat 线程立即释放。</p>
+<h3>6.3 为什么工具用接口而不是直接写死在循环里</h3>
+<ul>
+<li>接口让新增工具很简单：新建一个类，实现 AgentTool，加 @Component，完事</li>
+<li>不需要修改 AgentService 或 ToolRegistry</li>
+<li>这是"开闭原则"——对扩展开放，对修改关闭</li>
+</ul>
+<hr />
+<h2>七、从 C++ 到 Java 的关键思维转换</h2>
+<table>
+<thead>
+<tr>
+<th>C++ 习惯</th>
+<th>Java 做法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>手动 new 对象，手动 delete</td>
+<td>Spring 自动创建和管理，你不需要关心生命周期</td>
+</tr>
+<tr>
+<td>手写函数指针表 dispatch RPC</td>
+<td>Spring 自动收集实现了接口的类</td>
+</tr>
+<tr>
+<td>手写 JSON 解析</td>
+<td>Jackson 自动转成 Java 对象</td>
+</tr>
+<tr>
+<td>手写 main 启动服务器</td>
+<td>SpringApplication.run() 自动启动 Tomcat</td>
+</tr>
+<tr>
+<td>头文件 <code>.h</code> + 实现文件 <code>.cpp</code></td>
+<td>一个 <code>.java</code> 文件搞定（没有头文件的概念）</td>
+</tr>
+<tr>
+<td><code>make</code> 或 <code>CMake</code> 编译</td>
+<td><code>gradlew build</code> 自动下载依赖并编译</td>
+</tr>
+<tr>
+<td><code>.exe</code> 运行</td>
+<td><code>java -jar xxx.jar</code> 在 JVM 里运行</td>
+</tr>
+</tbody>
+</table></body></html>

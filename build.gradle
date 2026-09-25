@@ -1,0 +1,149 @@
+// ========== 插件 ==========
+// Gradle 是构建工具（类似 C++ 的 CMake）
+// 插件 提供额外功能——Java 编译、Spring Boot 打包等
+plugins {
+    // 让 Gradle 能编译 Java 代码（调用 javac）
+    id 'java'
+    // Spring Boot 插件：自动配置 Tomcat、Jackson，能打可执行 JAR
+    id 'org.springframework.boot' version '3.2.0'
+    // 自动管理依赖版本（不再需要手动写每个库的版本号）
+    id 'io.spring.dependency-management' version '1.1.4'
+}
+
+// ========== 项目信息 ==========
+// group + artifact + version = Maven 坐标（相当于 vcpkg 里的包名）
+group = 'com.example'
+version = '1.0.0'
+
+// ========== Java 编译配置 ==========
+java {
+    // toolchain：告诉 Gradle 用哪个版本的 JDK 编译
+    // 如果系统没有 JDK 17，Gradle 会自动下载一个
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    // sourceCompatibility：源码用 Java 17 语法写
+    sourceCompatibility = JavaVersion.VERSION_17
+    // targetCompatibility：输出兼容 Java 17 运行时的 .class
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+// ========== 依赖仓库 ==========
+// Gradle 从这些地方下载依赖（类似 vcpkg 的 registry）
+repositories {
+    // Maven Central = Java 世界最大的包仓库（类似 npm registry / vcpkg）
+    mavenCentral()
+}
+
+// ========== 依赖声明 ==========
+dependencies {
+    // spring-boot-starter-web：Spring Boot 的 Web 开发启动器
+    // 一个依赖会自动引入：Spring MVC + Jackson + Tomcat
+    // implementation = 编译和运行时都需要（类似 CMake 的 target_link_libraries）
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa' // Spring Data JPA，简化数据库访问
+    implementation 'org.xerial:sqlite-jdbc:3.45.3.0' // SQLite JDBC 驱动，允许 Java 程序访问 SQLite 数据库                    
+    implementation 'org.hibernate.orm:hibernate-community-dialects' // Hibernate 社区方言，提供对 SQLite 的支持
+
+
+    // Lombok：编译时自动生成 getter/setter/constructor/toString
+    // compileOnly = 只在编译时需要，运行时不需要（代码已内联）
+    compileOnly 'org.projectlombok:lombok'
+    // annotationProcessor = 告诉 javac 处理 Lombok 注解
+    annotationProcessor 'org.projectlombok:lombok'
+}
+
+// ========================================================================
+//  Java 编译日志配置（学习编译过程用）
+// ========================================================================
+
+// compileJava 是 Gradle 内置的 task，负责把 src/main/java/*.java → build/classes/*.class
+tasks.named('compileJava') {
+
+    // ---- javac 参数 ----
+    // 给 javac 传递 -verbose 参数
+    // 这样编译器会输出内部工作细节：
+    //   [parsing started ...]  — 开始解析哪个 .java 文件
+    //   [loading ...]          — 从 classpath 加载了哪个类
+    //   [checking ...]         — 正在做类型检查
+    //   [wrote ... .class]     — 已输出 .class 文件
+    //   [total ...ms]          — 总耗时
+    options.compilerArgs << '-verbose'
+
+    // ---- 编译前日志 ----
+    // doFirst 里的代码在编译开始前执行
+    // 打印：正在编译哪些源文件
+    doFirst {
+        // source 是一个 FileCollection（Gradle 找到的所有 .java 文件）
+        // logger.lifecycle = Gradle 内置日志，对应 C++ 的 printf
+        logger.lifecycle ''
+        logger.lifecycle '╔══════════════════════════════════════════╗'
+        logger.lifecycle '║  开始编译 Java 源码                       ║'
+        logger.lifecycle '╚══════════════════════════════════════════╝'
+        logger.lifecycle ''
+
+        // 列出所有即将编译的 .java 文件（去掉绝对路径前缀，只显示相对路径）
+        logger.lifecycle '即将编译 {} 个源文件：', source.size()
+        source.each { file ->
+            // file.absolutePath 是完整路径，我们提取相对路径部分
+            // 类似 C++ 里 gcc 的 -I 打印头文件搜索路径
+            logger.lifecycle '  → {}', file.absolutePath.split('src\\\\main\\\\java\\\\')[1]
+        }
+        logger.lifecycle ''
+    }
+
+    // ---- 编译后日志 ----
+    // doLast 里的代码在所有 .java 编译完成后执行
+    // 打印：输出了哪些 .class 文件、编译是否成功
+    doLast {
+        logger.lifecycle ''
+        logger.lifecycle '╔══════════════════════════════════════════╗'
+        logger.lifecycle '║  编译完成                                ║'
+        logger.lifecycle '╚══════════════════════════════════════════╝'
+        logger.lifecycle ''
+        // 输出目录 = build/classes/java/main
+        // tree 类似 C++ 编译后的 .o 文件输出目录
+        logger.lifecycle '输出目录：build/classes/java/main/'
+        logger.lifecycle ''
+        logger.lifecycle '编译流程回顾：'
+        logger.lifecycle '  .java 源文件 → javac → Annotation Processor → Semantic Analyzer → .class 字节码'
+        logger.lifecycle ''
+        logger.lifecycle '运行方式：'
+        logger.lifecycle '  开发调试：gradlew.bat bootRun'
+        logger.lifecycle '  生产打包：gradlew.bat build'
+        logger.lifecycle '     然后：java -jar build/libs/cc-agent-java-1.0.0.jar'
+        logger.lifecycle ''
+    }
+}
+
+// ---- bootRun 也加日志 ----
+// bootRun 是 Spring Boot 插件提供的 task：先编译，再启动应用
+// logging.level.org.springframework = 控制 Spring 自身的日志级别
+tasks.named('bootRun') {
+    doFirst {
+        logger.lifecycle ''
+        logger.lifecycle '╔══════════════════════════════════════════╗'
+        logger.lifecycle '║  启动 Spring Boot 应用                    ║'
+        logger.lifecycle '╚══════════════════════════════════════════╝'
+        logger.lifecycle '  Tomcat 端口：8080'
+        logger.lifecycle '  API 地址：http://localhost:8080/api/chat'
+        logger.lifecycle '  流式地址：http://localhost:8080/api/chat/stream?message=hello'
+        logger.lifecycle ''
+    }
+}
+
+// ---- clean 也加日志 ----
+tasks.named('clean') {
+    doFirst {
+        logger.lifecycle '清理构建产物（build/ 目录）...'
+    }
+    doLast {
+        logger.lifecycle '清理完成'
+    }
+}
+
+// ========== 测试配置 ==========
+tasks.named('test') {
+    useJUnitPlatform()
+}
