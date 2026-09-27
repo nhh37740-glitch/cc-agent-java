@@ -14,7 +14,7 @@ pipeline {
                     container_id="$(sudo docker create "cc-agent-java-build:${BUILD_NUMBER}")"
                     trap 'sudo docker rm -f "$container_id" >/dev/null' EXIT
                     mkdir -p dist
-                    docker cp "$container_id:/src/dist/." dist/
+                    sudo docker cp "$container_id:/src/dist/." dist/
                 '''
                 archiveArtifacts artifacts: 'dist/**', fingerprint: true
             }
