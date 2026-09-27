@@ -8,45 +8,30 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 代码注释面向 **C++ 背景的 Java 初学者** —— 用大白话解释 Java 概念，不假设读者熟悉 Spring 注解或 JVM。修改代码时请保持这个风格。
 
-## 构建与运行
+## 模块与构建
 
-项目自带 JDK 17（`jdk17/jdk-17.0.14+7`）和 Gradle Wrapper（`gradlew.bat`），**不需要本机安装 Java 或 Gradle**。
+Codex 不在本机运行 Gradle 或 `javac`。标准构建和运行验证由 Linux Jenkins 节点内的 Docker 流水线完成：`scripts/release.py` 先运行 `scripts/check_boundaries.py`，再调用 Gradle 构建并生成可运行 JAR 与 SHA-256 manifest；Jenkins 随后归档产物并构建运行镜像。部署由 `Jenkinsfile` 的 `DeployDemo` 参数控制，默认关闭。具体操作见 [README.md](README.md)。
 
-```bat
-REM 一键编译并启动（推荐 —— run.bat 会把项目内 JDK 设到临时 JAVA_HOME）
-run.bat
+`DEEPSEEK_API_KEY` 由运行环境注入，不能写入仓库或镜像。服务提供 `POST /api/chat`、SSE `GET /api/chat/stream`、会话读取接口和 `/agent.html` 页面。
 
-REM 等价命令
-gradlew.bat bootRun        REM 编译并启动 Spring Boot
-gradlew.bat build          REM 打包成 build/libs/cc-agent-java-1.0.0.jar
-gradlew.bat clean          REM 清理 build/ 目录
-```
+`build.gradle` 保留 `compileJava` 的 `-verbose` 与生命周期日志，用于服务端构建诊断。
 
-启动后服务监听 `http://localhost:8080`：
-- 非流式：`POST /api/chat`，body `{"message": "..."}`
-- 流式（SSE）：`GET /api/chat/stream?message=...`
-- 调试前端：`http://localhost:8080/agent.html`
+## 模块与整体架构
 
-`build.gradle` 给 `compileJava` 加了 `-verbose` 和详细生命周期日志，编译时会打印每个源文件的解析、加载、检查、写入过程 —— 这是项目特意保留的，方便观察 Java 编译流程，不要移除。
+`agent-contracts/` 是 9 个共享 FQCN 的唯一源码所有者：消息与会话模型、`Compressor` 和 `AgentTool`。根应用通过 `implementation project(':agent-contracts')` 使用这些类型；不要在 `src/main/java` 重新声明它们。`scripts/check_boundaries.py` 会拒绝重复类型，并检查契约模块没有反向依赖 Spring、持久层或应用服务。
 
-## 整体架构
-
-请求从外到内经过四层，**每一层都通过 Spring 注解和依赖注入连接**：
+根应用负责 HTTP 控制器、Agent 流程、DeepSeek 客户端、会话持久化和具体工具。请求从外到内经过以下组件：
 
 ```
 HTTP 请求
-    ↓  (Spring MVC 路由)
-ChatController          @RestController     —— 接收请求，返回响应
-    ↓  @Autowired
-AgentService            @Service            —— Agent 循环（最多 10 轮）
-    ↓  @Autowired       │
-    │                   ├──→ AnthropicClient   @Component  —— 调 DeepSeek API
-    │                   │
-    │                   └──→ ToolRegistry      @Component  —— 工具分发
-    │                              │
-    │                              └──→ FileReadTool / FileWriteTool / BashTool
-    │                                          ↓  @Autowired
-    │                                   PathValidator      —— 限制路径在 workspace-dir 内
+    ↓ Spring MVC
+ChatController          —— 接收请求并返回响应
+    ↓
+AgentService            —— Agent 循环
+    ├── AnthropicClient  —— 调用 DeepSeek API
+    └── ToolRegistry     —— 分发 contracts 中定义的 AgentTool 实现
+        └── FileReadTool / FileWriteTool / FileListTool / BashTool
+            └── PathValidator —— 限制文件操作在 workspace-dir 内
 ```
 
 ### Agent 循环（AgentService）
@@ -84,7 +69,7 @@ AgentService            @Service            —— Agent 循环（最多 10 轮�
 
 ## 当前状态与已知问题
 
-编译通过（`BUILD SUCCESSFUL`），`POST /api/chat` 工作正常。
+模块边界由静态检查维护；编译、运行与端到端验证以服务端 Jenkins/Docker 流水线结果为准。
 
 - **`BashTool` 已启用**：工具名是 `bash`，但不会把整段命令交给系统 shell 自由解释。它固定在 `workspace-dir` 下执行，并带白名单：
   - `git` 只允许 `status/diff/log/show/branch/rev-parse/ls-files/grep`
@@ -96,34 +81,27 @@ AgentService            @Service            —— Agent 循环（最多 10 轮�
   2. `ChatController.java` 的 `@GetMapping(produces = "text/event-stream;charset=UTF-8")` 让 Tomcat 按 UTF-8 写出（默认 `text/event-stream` 无 charset，Tomcat fallback 到 ISO-8859-1）
 
   这两处缺一不可。前端直接用 `fetch` + `TextDecoder('utf-8')` 解流，**不要**再加 Base64 之类的二次编码。
-- **没有测试代码**：`src/test/` 目录不存在，`tasks.named('test')` 会无操作通过。
+- **没有 Java 自动化测试源码**：当前 `src/test/` 不存在，Gradle 的 `test` 任务不提供行为覆盖。`scripts/check_boundaries.py` 是静态架构门禁，不应描述为 Java 单元测试。
 
 ## API Key
 
 `application.yml` 当前使用 `${DEEPSEEK_API_KEY}` 环境变量占位符，不包含默认密钥。运行或发布时由环境提供真实 Key，不能写入仓库或镜像。
 
-## 包结构
+## 模块结构
 
 ```
-com.example.ccagent
-├── CcAgentApplication       —— main 入口，@SpringBootApplication + @EnableAsync
-├── controller/
-│   └── ChatController       —— /api/chat, /api/chat/stream
-├── service/
-│   ├── AgentService         —— Agent 循环（同步 + 流式）
-│   ├── AnthropicClient      —— HttpClient 调 DeepSeek API，解析 Anthropic 格式响应
-│   ├── ToolRegistry         —— 自动收集所有 AgentTool 实现
-│   └── PathValidator        —— resolve + normalize + startsWith 防止 ../ 越狱
-├── tool/
-│   ├── AgentTool            —— 工具接口（getName / getDescription / execute）
-│   ├── FileReadTool         —— Files.readString
-│   ├── FileWriteTool        —— Files.writeString
-│   └── BashTool             —— 白名单命令执行，工作目录固定在 workspace
-├── model/                   —— 全是 record
-│   ├── Message              —— role + content + toolUseId
-│   ├── ToolCall             —— id + name + input
-│   ├── ToolResult           —— toolCallId + content + isError
-│   └── ChatRequest          —— message
-└── config/
-    └── AgentProperties      —— @ConfigurationProperties(prefix = "agent")
+agent-contracts/src/main/java/com/example/ccagent
+├── model/                 —— ChatRequest、ChatResponse、ConversationSummary、Compressor、Message、SessionJson、ToolCall、ToolResult
+└── tool/AgentTool         —— 具体工具实现遵循的共享接口
+
+src/main/java/com/example/ccagent
+├── CcAgentApplication
+├── controller/ChatController
+├── config/AgentProperties
+├── service/               —— AgentService、AnthropicClient、SessionStore、ToolRegistry 等
+├── repository/             —— JSONL 备份
+├── model/JsonlBackupEntity —— 应用专属持久化实体
+└── tool/                   —— FileReadTool、FileWriteTool、FileListTool、BashTool
 ```
+
+共享类型只能从 `agent-contracts` 引入。`src/main/java` 中的 `model` 与 `tool` 目录只保存应用专属实现，不要复制共享 FQCN。

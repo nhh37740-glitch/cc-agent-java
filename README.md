@@ -5,48 +5,21 @@ Java 17 与 Spring Boot 实现的 DeepSeek Agent 学习项目。页面入口为
 
 ## 模块
 
-- `agent-contracts/`：消息、会话数据类型及 `AgentTool` 接口。只依赖 Java 17
-  和 Jackson 注解；没有 Spring、数据库或 HTTP 实现依赖。
-- 根项目 `src/`：Spring Boot HTTP 接口、Agent 循环、DeepSeek 客户端、
-  文件与命令工具、会话存储和 SQLite 备份。它依赖 `agent-contracts`。
+- `agent-contracts/` 是共享 Java 类型的唯一源码所有者，包括消息与会话模型、`Compressor` 和 `AgentTool`。它只依赖 Java 17 与 Jackson 注解，不依赖 Spring、数据库或 HTTP 实现。
+- 根项目 `src/` 提供 Spring Boot HTTP 接口、Agent 循环、DeepSeek 客户端、具体工具与会话存储，并通过 Gradle 项目依赖使用 `agent-contracts`。
+- `scripts/check_boundaries.py` 检查模块依赖方向，并确保上述 9 个共享类型只在 `agent-contracts` 中声明；根应用出现重复全名会使门禁失败。
 
-`scripts/check_boundaries.py` 检查契约模块的依赖方向。Gradle 编译进一步
-保证该模块无法直接引用根应用类，因为它没有反向项目依赖。
+## 服务端构建与二进制交付
 
-## 本地构建与发布
+Codex 的构建与运行验证在 Linux Jenkins 节点的 Docker 环境中完成，不在本机执行 Gradle 或 `javac`。Jenkins 流水线先运行模块边界检查与 Gradle 构建，归档可运行 Spring Boot JAR 和 `dist/manifest.json`，再构建运行镜像。manifest 记录源码 commit、工作树摘要、工具链版本及 JAR SHA-256。
 
-Windows 上的 `run.bat` 使用项目目录下的 JDK 17 启动服务。
-`DEEPSEEK_API_KEY` 必须由环境变量提供。
-
-```powershell
-./gradlew.bat build
-python scripts/release.py
-java -jar dist/cc-agent-java-1.0.0.jar
-```
-
-发布脚本先检查模块边界并执行 Gradle build，然后生成可运行 JAR 和
-`dist/manifest.json`。清单包含 Git commit、commit tree、工作树 SHA-256、
-Java/Gradle 版本以及 JAR 的 SHA-256。
+交付物是一个包含 `agent-contracts` 依赖的可运行应用 JAR，以及该 JAR 的校验清单；目前不单独发布 `agent-contracts` 二进制包。`DEEPSEEK_API_KEY` 只通过部署环境注入，不写入源码或镜像。
 
 ## Docker 与 Jenkins
 
-`Dockerfile` 在 JDK 17 容器中构建并验证 JAR，运行镜像保留 JDK、Git 和
-ripgrep，让 workspace 内的 Gradle Wrapper 与白名单命令可执行。生产数据
-保存在 `/app/workspace`，日志在 `/app/logs`。
+`Dockerfile` 在 JDK 17 构建镜像中运行边界检查与打包脚本，再生成以 UID 10001 非 root 用户运行的镜像。运行容器保留 JDK、Git 和 ripgrep，使 workspace 内的白名单工具可执行；生产数据位于 `/app/workspace`，日志位于 `/app/logs`。公共入口应经过已认证的反向代理，并只挂载 Agent 需要访问的工作目录。
 
-```bash
-docker build -t cc-agent-java:local .
-docker run --rm -p 127.0.0.1:8082:8080 \
-  -e DEEPSEEK_API_KEY \
-  -v /srv/cc-agent-java/workspace:/app/workspace \
-  -v /srv/cc-agent-java/logs:/app/logs \
-  cc-agent-java:local
-```
-
-Jenkinsfile 在带 Docker 的 Linux 节点上执行模块检查、Gradle 构建、
-JAR 与清单归档以及运行镜像构建。容器以非 root 用户运行；服务器上的
-挂载目录需要允许 UID 10001 写入。对外提供入口时应由已认证的反向代理
-接入，并只挂载 Agent 需要处理的工作目录。
+`Jenkinsfile` 在带 Docker 的 Linux 节点执行构建、归档和运行镜像生成。Codex 按项目约定只做静态检查并通过 Jenkins 完成编译、集成验证和部署；不要在本机运行 Gradle 或 `javac`。
 
 ### 演示机部署
 
