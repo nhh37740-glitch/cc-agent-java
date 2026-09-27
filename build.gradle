@@ -37,6 +37,9 @@ repositories {
 
 // ========== 依赖声明 ==========
 dependencies {
+    // 纯 Java 的 Agent 消息与工具契约，由独立模块提供。
+    implementation project(':agent-contracts')
+
     // spring-boot-starter-web：Spring Boot 的 Web 开发启动器
     // 一个依赖会自动引入：Spring MVC + Jackson + Tomcat
     // implementation = 编译和运行时都需要（类似 CMake 的 target_link_libraries）

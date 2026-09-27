@@ -1,0 +1,16 @@
+.git
+.claude
+.gradle
+build
+dist
+data
+gradle-project-cache
+gradle-run-home
+jdk17
+logs
+workspace
+*.msi
+*.zip
+*.png
+.env
+application-local.yml

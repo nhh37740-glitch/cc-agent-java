@@ -1,3 +1,4 @@
 // 项目名称，Gradle 打包时用这个名字生成 JAR 文件
 // 类比 CMakeLists 的 project(MyProject)
 rootProject.name = 'cc-agent-java'
+include 'agent-contracts'

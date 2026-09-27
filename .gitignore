@@ -1,6 +1,7 @@
 # Build and local runtime output
 .gradle/
 build/
+dist/
 data/
 gradle-project-cache/
 gradle-run-home/

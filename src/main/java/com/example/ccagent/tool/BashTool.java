@@ -115,9 +115,9 @@ public class BashTool implements AgentTool {
         }
 
         List<String> processCommand = new ArrayList<>(parts);
-        processCommand.set(0, executable);
 
         Path workspaceDir = workspaceDir();
+        processCommand.set(0, resolveExecutable(executable, workspaceDir));
         ProcessBuilder builder = new ProcessBuilder(processCommand);
         builder.directory(workspaceDir.toFile());
         builder.redirectErrorStream(true);
@@ -138,6 +138,27 @@ public class BashTool implements AgentTool {
         }
 
         return limitOutput(output);
+    }
+
+    // Gradle Wrapper 属于当前 workspace，不能依赖它恰好位于系统 PATH。
+    private String resolveExecutable(String executable, Path workspaceDir) {
+        if (!"gradlew".equals(executable) && !"gradlew.bat".equals(executable)) {
+            return executable;
+        }
+
+        boolean windows = System.getProperty("os.name").toLowerCase().contains("win");
+        if (!windows && "gradlew.bat".equals(executable)) {
+            throw new IllegalArgumentException("Linux 容器内请使用 gradlew，不能执行 gradlew.bat");
+        }
+
+        Path wrapper = workspaceDir.resolve(executable).normalize();
+        if (!wrapper.startsWith(workspaceDir) || !Files.isRegularFile(wrapper)) {
+            throw new IllegalArgumentException("workspace 内没有 Gradle Wrapper: " + executable);
+        }
+        if (!windows && !Files.isExecutable(wrapper)) {
+            throw new IllegalArgumentException("Gradle Wrapper 没有执行权限: " + executable);
+        }
+        return wrapper.toString();
     }
 
     private String readCommand(Map<String, Object> input) {

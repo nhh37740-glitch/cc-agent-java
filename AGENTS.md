@@ -100,7 +100,7 @@ AgentService            @Service            —— Agent 循环（最多 10 轮�
 
 ## API Key
 
-`application.yml:13` 当前**硬编码了 DeepSeek API key**。这是学习项目里图省事的写法，注释里也写了"从环境变量读取"是目标但还没做。提交到任何公开仓库前必须先把它换成 `${DEEPSEEK_API_KEY}` 之类的占位符。
+`application.yml` 当前使用 `${DEEPSEEK_API_KEY}` 环境变量占位符，不包含默认密钥。运行或发布时由环境提供真实 Key，不能写入仓库或镜像。
 
 ## 包结构
 
