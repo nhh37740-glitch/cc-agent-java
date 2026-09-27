@@ -91,7 +91,8 @@ tasks.named('compileJava') {
         source.each { file ->
             // file.absolutePath 是完整路径，我们提取相对路径部分
             // 类似 C++ 里 gcc 的 -I 打印头文件搜索路径
-            logger.lifecycle '  → {}', file.absolutePath.split('src\\\\main\\\\java\\\\')[1]
+            def relativeSourcePath = rootProject.projectDir.toPath().relativize(file.toPath()).toString()
+            logger.lifecycle '  → {}', relativeSourcePath
         }
         logger.lifecycle ''
     }
