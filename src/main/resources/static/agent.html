@@ -162,7 +162,7 @@
                             <label class="block text-xs font-medium text-gray-300">POST 接口 URL (手动输入)</label>
                             <span id="post-active-badge" class="text-[9px] bg-brand-600 text-white px-1.5 py-0.2 rounded font-bold">ACTIVE</span>
                         </div>
-                        <input type="text" id="post-url" value="http://localhost:8080/api/chat" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-gray-100 font-mono transition-colors" oninput="updateCurlPreview()">
+                        <input type="text" id="post-url" value="" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-gray-100 font-mono transition-colors" oninput="updateCurlPreview()">
                     </div>
 
                     <!-- 手动输入 GET URL -->
@@ -171,7 +171,7 @@
                             <label class="block text-xs font-medium text-gray-350">GET 流式 URL (手动输入)</label>
                             <span id="get-active-badge" class="hidden text-[9px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-bold">ACTIVE</span>
                         </div>
-                        <input type="text" id="get-url" value="http://localhost:8080/api/chat/stream" class="w-full bg-gray-900 border border-gray-750 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-gray-150 font-mono transition-colors" oninput="updateCurlPreview()">
+                        <input type="text" id="get-url" value="" class="w-full bg-gray-900 border border-gray-750 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-gray-150 font-mono transition-colors" oninput="updateCurlPreview()">
                         <p class="text-[10px] text-gray-500 mt-1">💡 工具会自动将用户消息以 `?message=...` 的形式附加到此 URL 的末尾</p>
                     </div>
                 </div>
@@ -263,7 +263,7 @@
                         <i class="fa-regular fa-copy"></i> 复制
                     </button>
                 </div>
-                <pre id="curl-preview" class="text-[11px] font-mono text-brand-100/70 whitespace-pre-wrap break-all max-h-32 overflow-y-auto no-scrollbar">curl -X POST http://localhost:8080/api/chat -H "Content-Type: application/json" -d '{"message":"..."}'</pre>
+                <pre id="curl-preview" class="text-[11px] font-mono text-brand-100/70 whitespace-pre-wrap break-all max-h-32 overflow-y-auto no-scrollbar"></pre>
             </div>
             
         </section>
@@ -378,8 +378,16 @@
         let currentConversationId = localStorage.getItem('cc-agent-conversation-id') || '';
         let conversationCache = [];
 
+        // Resolve the API beside this page. At /agent.html this remains /api; when the same static
+        // page is served below /projects/apps/java/ it becomes /projects/apps/java/api.
+        const API_BASE_URL = new URL('api', window.location.href).href.replace(/\/$/, '');
+        const DEFAULT_POST_URL = `${API_BASE_URL}/chat`;
+        const DEFAULT_STREAM_URL = `${API_BASE_URL}/chat/stream`;
+
         // 初始化
         window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('post-url').value = DEFAULT_POST_URL;
+            document.getElementById('get-url').value = DEFAULT_STREAM_URL;
             // 绑定快捷键 Ctrl+Enter
             document.getElementById('prompt-input').addEventListener('keydown', (e) => {
                 if (e.ctrlKey && e.key === 'Enter') {
@@ -564,13 +572,7 @@
         }
 
         function getApiBaseUrl() {
-            const postUrl = document.getElementById('post-url').value.trim() || 'http://localhost:8080/api/chat';
-            try {
-                const url = new URL(postUrl);
-                return `${url.origin}/api`;
-            } catch {
-                return 'http://localhost:8080/api';
-            }
+            return API_BASE_URL;
         }
 
         // 切换调试模式
@@ -709,12 +711,12 @@
 
             let curlCmd = '';
             if (currentMode === 'post') {
-                const postUrl = document.getElementById('post-url').value.trim() || 'http://localhost:8080/api/chat';
+                const postUrl = document.getElementById('post-url').value.trim() || DEFAULT_POST_URL;
                 const body = conversationId ? { message: prompt, conversationId } : { message: prompt };
                 const escapedBody = JSON.stringify(body).replace(/'/g, "'\\''");
                 curlCmd = `curl -X POST ${postUrl}${headerStr} -d '${escapedBody}'`;
             } else {
-                const getUrl = document.getElementById('get-url').value.trim() || 'http://localhost:8080/api/chat/stream';
+                const getUrl = document.getElementById('get-url').value.trim() || DEFAULT_STREAM_URL;
                 const separator = getUrl.includes('?') ? '&' : '?';
                 const conversationPart = conversationId ? `&conversationId=${encodeURIComponent(conversationId)}` : '';
                 curlCmd = `curl -N "${getUrl}${separator}message=${encodeURIComponent(prompt)}${conversationPart}"${headerStr}`;
