@@ -55,6 +55,8 @@ Jenkins 参数 `DeployDemo` 是布尔开关，默认关闭。只有显式勾选�
 部署脚本从当前容器继承环境变量、已有数据卷和内存/CPU 限额，不把密钥写入日志；旧镜像保留为
 `cc-agent-java:previous`。新容器必须通过 Docker 健康检查、`/agent.html` 页面检查和
 `/api/conversations` API 检查，否则脚本会移除新容器并恢复原容器。
+容器的 `/tmp` 使用 64 MiB tmpfs，显式允许执行 SQLite JDBC 解压出的 native 库，并保持
+`nosuid,nodev` 与标准临时目录权限；SQLite native 提取需要 `exec` 挂载选项。
 
 首次迁移时，如果旧容器没有挂载 `/app/workspace`，脚本会停止旧容器以固定 SQLite 数据，创建
 命名卷 `cc-agent-java-workspace`，并通过 Docker tar 流把容器层的 workspace 直接复制进卷；数据

@@ -118,7 +118,7 @@ old_renamed=true
 run_args=(
     --detach
     --name "$old_name"
-    --tmpfs /tmp:size=64m
+    --tmpfs /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777
     --cap-drop ALL
     --security-opt no-new-privileges
     --publish "127.0.0.1:${HOST_PORT}:8080"
