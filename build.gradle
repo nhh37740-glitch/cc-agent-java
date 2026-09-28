@@ -55,6 +55,9 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     // annotationProcessor = 告诉 javac 处理 Lombok 注解
     annotationProcessor 'org.projectlombok:lombok'
+
+    // Jenkins 的 Gradle build 运行会话隔离与 DeepSeek 请求头测试。
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
 // ========================================================================

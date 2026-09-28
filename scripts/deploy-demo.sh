@@ -176,12 +176,20 @@ ready=false
 last_health='unknown'
 last_page_status='000'
 last_api_status='000'
+last_settings_page_status='000'
+last_settings_script_status='000'
+last_settings_api_status='000'
 smoke_started=$SECONDS
 while (( SECONDS - smoke_started < 120 )); do
     last_health="$(docker_cmd inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$old_name" 2>/dev/null || printf 'unavailable')"
     last_page_status="$(http_status '/agent.html')"
     last_api_status="$(http_status '/api/conversations')"
-    if [[ "$last_health" == healthy && "$last_page_status" == 200 && "$last_api_status" == 200 ]]; then
+    last_settings_page_status="$(http_status '/deepseek-key.html')"
+    last_settings_script_status="$(http_status '/deepseek-key.js')"
+    last_settings_api_status="$(http_status '/api/settings/deepseek')"
+    if [[ "$last_health" == healthy && "$last_page_status" == 200 && "$last_api_status" == 200 &&
+          "$last_settings_page_status" == 200 && "$last_settings_script_status" == 200 &&
+          "$last_settings_api_status" == 200 ]]; then
         ready=true
         break
     fi
@@ -192,8 +200,17 @@ if [[ "$ready" != true ]]; then
     # headers, or container environment into the Jenkins console.
     state_summary="$(docker_cmd inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$old_name" 2>/dev/null || printf 'status=unavailable')"
     smoke_elapsed=$((SECONDS - smoke_started))
-    fail "smoke check timed out after ${smoke_elapsed}s: health=${last_health} page_http=${last_page_status} api_http=${last_api_status} ${state_summary}"
+    fail "smoke check timed out after ${smoke_elapsed}s: health=${last_health} page_http=${last_page_status} api_http=${last_api_status} key_page_http=${last_settings_page_status} key_script_http=${last_settings_script_status} key_api_http=${last_settings_api_status} ${state_summary}"
 fi
+
+# The public HTTP page must ship with a hidden and disabled key input. Only the
+# browser-side HTTPS/loopback check enables it; never print the page or script.
+settings_page="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${HOST_PORT}/deepseek-key.html")"
+settings_script="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${HOST_PORT}/deepseek-key.js")"
+grep -Fq 'id="key-form" autocomplete="off" hidden' <<<"$settings_page" || fail 'key input form is not hidden by default'
+grep -Fq 'maxlength="512" required disabled' <<<"$settings_page" || fail 'key input is not disabled by default'
+grep -Fq "window.location.protocol === 'https:'" <<<"$settings_script" || fail 'key entry HTTPS guard is missing'
+grep -Fq "window.location.protocol === 'http:' && isLoopback" <<<"$settings_script" || fail 'key entry loopback guard is missing'
 
 docker_cmd rm "$rollback_name" >/dev/null
 deployment_ok=true

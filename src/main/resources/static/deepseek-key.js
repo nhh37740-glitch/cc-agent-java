@@ -10,10 +10,11 @@ const isLoopback = hostname === 'localhost' || hostname === '[::1]' || hostname 
 const canEditKey = window.location.protocol === 'https:'
     || (window.location.protocol === 'http:' && isLoopback);
 
-if (!canEditKey) {
-    document.getElementById('key-form').hidden = true;
-    document.getElementById('remove-key').hidden = true;
-    keyInput.disabled = true;
+if (canEditKey) {
+    document.getElementById('key-form').hidden = false;
+    document.getElementById('remove-key').hidden = false;
+    keyInput.disabled = false;
+} else {
     resultElement.textContent = '当前入口使用 HTTP。请通过 HTTPS 打开此页面后再输入 DeepSeek API Key。';
 }
 

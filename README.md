@@ -29,6 +29,9 @@ Codex 的构建与运行验证在 Linux Jenkins 节点的 Docker 环境中完成
 `Dockerfile` 在 JDK 17 构建镜像中运行边界检查与打包脚本，再生成以 UID 10001 非 root 用户运行的镜像。运行容器保留 JDK、Git 和 ripgrep，使 workspace 内的白名单工具可执行；生产数据位于 `/app/workspace`，日志位于 `/app/logs`。公共入口应经过已认证的反向代理，并只挂载 Agent 需要访问的工作目录。
 
 `Jenkinsfile` 在带 Docker 的 Linux 节点执行构建、归档和运行镜像生成。Codex 按项目约定只做静态检查并通过 Jenkins 完成编译、集成验证和部署；不要在本机运行 Gradle 或 `javac`。
+Gradle `build` 会运行 DeepSeek 会话隔离、接口响应掩码和请求头选择测试；
+启用 `DeployDemo` 时还会检查密钥设置页、脚本、状态接口和公开 HTTP 页面
+默认隐藏并禁用密钥输入框。
 
 ### 演示机部署
 
