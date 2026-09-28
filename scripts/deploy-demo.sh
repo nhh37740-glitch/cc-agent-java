@@ -76,6 +76,19 @@ trap on_exit EXIT
 
 docker_cmd inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$old_id" > "$env_file"
 
+# The Docker published loopback port reaches the container from its bridge gateway.
+# Preserve any existing trusted peers and add the gateway reported by Docker;
+# do not guess 172.17.0.1 or print the inherited environment.
+trusted_proxy_addresses='127.0.0.1,::1,0:0:0:0:0:0:0:1'
+existing_trusted_proxy_addresses="$(sed -n 's/^DEEPSEEK_TRUSTED_PROXY_ADDRESSES=//p' "$env_file" | tail -n 1)"
+if [[ -n "$existing_trusted_proxy_addresses" ]]; then
+    trusted_proxy_addresses+=",${existing_trusted_proxy_addresses}"
+fi
+gateway_addresses="$(docker_cmd inspect --format '{{range .NetworkSettings.Networks}}{{if .Gateway}}{{.Gateway}},{{end}}{{if .IPv6Gateway}}{{.IPv6Gateway}},{{end}}{{end}}' "$old_id")"
+if [[ -n "$gateway_addresses" ]]; then
+    trusted_proxy_addresses+=",${gateway_addresses%,}"
+fi
+
 # A pre-existing volume is trusted only when it carries the marker for this exact source container.
 # An unmarked volume is never cleared or overwritten; it needs operator review instead.
 if [[ "$workspace_mount" != yes ]]; then
@@ -123,6 +136,7 @@ run_args=(
     --security-opt no-new-privileges
     --publish "127.0.0.1:${HOST_PORT}:8080"
     --env-file "$env_file"
+    --env "DEEPSEEK_TRUSTED_PROXY_ADDRESSES=${trusted_proxy_addresses}"
 )
 if [[ "$workspace_mount" == yes ]]; then
     run_args+=(--volumes-from "$rollback_name")
@@ -172,6 +186,23 @@ http_status() {
     fi
 }
 
+key_write_status() {
+    local origin="$1" host="$2" status
+    shift 2
+    # The value is a fixed, nonfunctional smoke fixture. No cookies or response body are saved.
+    status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --noproxy '*' --connect-timeout 1 --max-time 3 \
+        --request PUT --header "Host: ${host}" --header "Origin: ${origin}" \
+        --header 'X-Agent-Config: same-origin' --header 'Content-Type: application/json' \
+        "$@" --data '{"apiKey":"smoke-example-key"}' \
+        "http://127.0.0.1:${HOST_PORT}/api/settings/deepseek" 2>/dev/null || true)"
+    if [[ "$status" =~ ^[0-9]{3}$ ]]; then
+        printf '%s' "$status"
+    else
+        printf '000'
+    fi
+}
+
 ready=false
 last_health='unknown'
 last_page_status='000'
@@ -211,6 +242,13 @@ grep -Fq 'id="key-form" autocomplete="off" hidden' <<<"$settings_page" || fail '
 grep -Fq 'maxlength="512" required disabled' <<<"$settings_page" || fail 'key input is not disabled by default'
 grep -Fq "window.location.protocol === 'https:'" <<<"$settings_script" || fail 'key entry HTTPS guard is missing'
 grep -Fq "window.location.protocol === 'http:' && isLoopback" <<<"$settings_script" || fail 'key entry loopback guard is missing'
+
+tunnel_origin="http://127.0.0.1:${HOST_PORT}"
+tunnel_status="$(key_write_status "$tunnel_origin" "127.0.0.1:${HOST_PORT}")"
+[[ "$tunnel_status" == 200 ]] || fail "direct loopback key setting smoke returned HTTP ${tunnel_status}"
+proxied_tunnel_status="$(key_write_status "$tunnel_origin" "127.0.0.1:${HOST_PORT}" \
+    --header 'X-Forwarded-Proto: http')"
+[[ "$proxied_tunnel_status" == 400 ]] || fail "proxied plaintext key setting smoke returned HTTP ${proxied_tunnel_status}"
 
 docker_cmd rm "$rollback_name" >/dev/null
 deployment_ok=true

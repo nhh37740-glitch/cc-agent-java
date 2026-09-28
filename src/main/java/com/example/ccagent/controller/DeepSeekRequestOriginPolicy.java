@@ -31,8 +31,13 @@ public class DeepSeekRequestOriginPolicy {
         }
 
         String scheme = origin.getScheme().toLowerCase();
+        boolean directLoopback = isLoopbackHost(request.getRemoteAddr());
+        // SSH 端口转发先到宿主机回环端口，再经过 Docker 网桥。
+        // 网桥地址必须被显式信任，而且直连请求不能带反向代理请求头。
+        boolean trustedTunnel = trustedProxyAddresses.contains(request.getRemoteAddr())
+            && !hasProxyHeaders(request);
         if ("http".equals(scheme) && isLoopbackHost(origin.getHost())
-                && isLoopbackHost(request.getRemoteAddr())) {
+                && (directLoopback || trustedTunnel)) {
             return;
         }
         // HTTPS 直连由 Servlet 确认。TLS 代理必须来自显式信任的 IP，
@@ -82,6 +87,13 @@ public class DeepSeekRequestOriginPolicy {
 
     private int effectivePort(URI uri, String scheme) {
         return uri.getPort() >= 0 ? uri.getPort() : "https".equalsIgnoreCase(scheme) ? 443 : 80;
+    }
+
+    private boolean hasProxyHeaders(HttpServletRequest request) {
+        return request.getHeader("X-Forwarded-Proto") != null
+            || request.getHeader("X-Real-IP") != null
+            || request.getHeader("X-Forwarded-For") != null
+            || request.getHeader("Forwarded") != null;
     }
 
     private boolean isLoopbackHost(String host) {

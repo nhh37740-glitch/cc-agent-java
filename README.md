@@ -28,6 +28,11 @@ Codex 的构建与运行验证在 Linux Jenkins 节点的 Docker 环境中完成
 容器看到的代理 IP 加入 `DEEPSEEK_TRUSTED_PROXY_ADDRESSES`（逗号分隔；
 默认只信任回环地址），并由代理覆盖 `X-Forwarded-Proto`。单独伪造该
 请求头不能绕过检查；移除密钥的 `DELETE` 行为不变。
+通过 SSH 将服务器回环端口转发到本机时，Docker 可能把连接对端显示为
+网桥网关。部署脚本从现有容器的网络配置读取网关并加入可信地址；此时
+回环 HTTP 请求须没有 `X-Forwarded-Proto`、`X-Real-IP`、
+`X-Forwarded-For` 或 `Forwarded` 代理头。部署 smoke 会验证直连放行和
+带代理头拒绝，使用固定示例值，不调用 DeepSeek。
 
 ## Docker 与 Jenkins
 

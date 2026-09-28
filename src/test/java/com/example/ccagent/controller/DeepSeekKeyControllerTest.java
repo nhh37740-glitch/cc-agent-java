@@ -174,4 +174,36 @@ class DeepSeekKeyControllerTest {
                 .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
             .andExpect(status().isOk());
     }
+
+    @Test
+    void trustedDockerGatewayAllowsDirectTunnelButRejectsProxyHeaders() throws Exception {
+        mvc = standaloneSetup(new DeepSeekKeyController(keys,
+            new DeepSeekRequestOriginPolicy("127.0.0.1,::1,172.17.0.1"))).build();
+        MockHttpSession tunnel = new MockHttpSession();
+        mvc.perform(put(PATH).session(tunnel)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://127.0.0.1:18102")
+                .header("Host", "127.0.0.1:18102")
+                .with(request -> { request.setRemoteAddr("172.17.0.1"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isOk());
+        mvc.perform(get(PATH).session(tunnel))
+            .andExpect(jsonPath("$.source").value("browser-session"));
+
+        for (String header : new String[]{"X-Forwarded-Proto", "X-Real-IP", "X-Forwarded-For", "Forwarded"}) {
+            MockHttpSession blocked = new MockHttpSession();
+            mvc.perform(put(PATH).session(blocked)
+                    .header("X-Agent-Config", "same-origin")
+                    .header("Origin", "http://127.0.0.1:18102")
+                    .header("Host", "127.0.0.1:18102")
+                    .header(header, "untrusted")
+                    .with(request -> { request.setRemoteAddr("172.17.0.1"); return request; })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+                .andExpect(status().isBadRequest());
+            mvc.perform(get(PATH).session(blocked))
+                .andExpect(jsonPath("$.source").value("environment"));
+        }
+    }
 }
