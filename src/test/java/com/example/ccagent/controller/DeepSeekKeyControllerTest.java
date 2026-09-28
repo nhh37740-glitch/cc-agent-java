@@ -29,7 +29,8 @@ class DeepSeekKeyControllerTest {
         AgentProperties properties = new AgentProperties(
             "http://127.0.0.1/messages", DEFAULT_KEY, "model", 1000, ".", 1000, 1000);
         keys = new DeepSeekKeyService(properties);
-        mvc = standaloneSetup(new DeepSeekKeyController(keys)).build();
+        mvc = standaloneSetup(new DeepSeekKeyController(
+            keys, new DeepSeekRequestOriginPolicy("127.0.0.1,::1"))).build();
     }
 
     @Test
@@ -45,6 +46,9 @@ class DeepSeekKeyControllerTest {
 
         String saved = mvc.perform(put(PATH).session(first)
                 .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://localhost")
+                .header("Host", "localhost")
+                .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
             .andExpect(status().isOk())
@@ -76,6 +80,9 @@ class DeepSeekKeyControllerTest {
         MockHttpSession session = new MockHttpSession();
         String response = mvc.perform(put(PATH).session(session)
                 .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://localhost")
+                .header("Host", "localhost")
+                .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"apiKey\":\"bad\\nkey\"}"))
             .andExpect(status().isBadRequest())
@@ -83,5 +90,88 @@ class DeepSeekKeyControllerTest {
         assertThat(response).doesNotContain("bad\\nkey");
         mvc.perform(get(PATH).session(session))
             .andExpect(jsonPath("$.source").value("environment"));
+    }
+
+    @Test
+    void publicHttpRejectsKeyEvenWithMarkerOrSpoofedForwardedProtocol() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        String response = mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://agent.example.test")
+                .header("Host", "agent.example.test")
+                .header("X-Forwarded-Proto", "https")
+                .with(request -> { request.setRemoteAddr("203.0.113.10"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andReturn().getResponse().getContentAsString();
+        assertThat(response).doesNotContain(SESSION_KEY);
+
+        // 即使请求到达本机代理，浏览器来源仍是 HTTP 时也不能写入密钥。
+        mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://agent.example.test")
+                .header("Host", "agent.example.test")
+                .header("X-Forwarded-Proto", "https")
+                .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isBadRequest());
+
+        // Host 和 Origin 即使都伪装成本机，远端连接也不能走明文例外。
+        mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "http://localhost")
+                .header("Host", "localhost")
+                .with(request -> { request.setRemoteAddr("203.0.113.10"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get(PATH).session(session))
+            .andExpect(jsonPath("$.source").value("environment"));
+    }
+
+    @Test
+    void httpsProxyRequiresTrustedPeerAndMatchingBrowserOrigin() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "https://other.example.test")
+                .header("Host", "agent.example.test")
+                .header("X-Forwarded-Proto", "https")
+                .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isBadRequest());
+
+        mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "https://agent.example.test")
+                .header("Host", "agent.example.test")
+                .header("X-Forwarded-Proto", "https")
+                .with(request -> { request.setRemoteAddr("203.0.113.10"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isBadRequest());
+
+        mvc.perform(put(PATH).session(session)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "https://agent.example.test")
+                .header("Host", "agent.example.test")
+                .header("X-Forwarded-Proto", "https")
+                .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(put(PATH).session(new MockHttpSession())
+                .secure(true)
+                .header("X-Agent-Config", "same-origin")
+                .header("Origin", "https://agent.example.test")
+                .header("Host", "agent.example.test")
+                .with(request -> { request.setRemoteAddr("203.0.113.10"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"apiKey\":\"" + SESSION_KEY + "\"}"))
+            .andExpect(status().isOk());
     }
 }

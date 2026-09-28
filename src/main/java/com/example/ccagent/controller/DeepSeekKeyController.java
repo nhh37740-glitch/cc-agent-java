@@ -21,9 +21,11 @@ import java.util.Map;
 @RequestMapping("/api/settings/deepseek")
 public class DeepSeekKeyController {
     private final DeepSeekKeyService keys;
+    private final DeepSeekRequestOriginPolicy origins;
 
-    public DeepSeekKeyController(DeepSeekKeyService keys) {
+    public DeepSeekKeyController(DeepSeekKeyService keys, DeepSeekRequestOriginPolicy origins) {
         this.keys = keys;
+        this.origins = origins;
     }
 
     @GetMapping
@@ -36,6 +38,7 @@ public class DeepSeekKeyController {
     public ResponseEntity<KeyStatus> replace(@RequestHeader("X-Agent-Config") String marker,
             @RequestBody KeyRequest body, HttpServletRequest request) {
         requireMarker(marker);
+        origins.requireSafeKeyWrite(request);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(keys.replace(request, body.apiKey()));
     }
 

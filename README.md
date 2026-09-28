@@ -23,6 +23,11 @@ Codex 的构建与运行验证在 Linux Jenkins 节点的 Docker 环境中完成
 压缩使用同一会话的密钥；未设置或移除网页密钥后使用环境变量默认值。
 服务重启或会话到期后网页密钥失效；多实例部署需要会话亲和或共享的
 安全会话存储。公开入口需要 HTTPS 才能从网页输入密钥。
+服务端 `PUT /api/settings/deepseek` 还会核对 `Origin` 与 `Host`：只接受
+同源 HTTPS，或同源的 localhost/回环 HTTP。TLS 在反向代理终止时，需将
+容器看到的代理 IP 加入 `DEEPSEEK_TRUSTED_PROXY_ADDRESSES`（逗号分隔；
+默认只信任回环地址），并由代理覆盖 `X-Forwarded-Proto`。单独伪造该
+请求头不能绕过检查；移除密钥的 `DELETE` 行为不变。
 
 ## Docker 与 Jenkins
 
