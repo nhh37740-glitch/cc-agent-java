@@ -126,6 +126,12 @@ public class AnthropicClient {
      */
     public AnthropicResponse chat(List<Message> history, List<Map<String, Object>> tools,
                                    String agentMemory, int maxTokens) throws Exception {
+        return chat(history, tools, agentMemory, maxTokens, properties.apiKey());
+    }
+
+    public AnthropicResponse chat(List<Message> history, List<Map<String, Object>> tools,
+                                   String agentMemory, int maxTokens, String apiKey) throws Exception {
+        requireApiKey(apiKey);
         // 记录 API 调用开始
         long startMs = System.currentTimeMillis();
         List<Map<String, Object>> safeTools = tools == null ? List.of() : tools;
@@ -154,7 +160,7 @@ public class AnthropicClient {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(properties.apiEndpoint()))
             .header("Content-Type", "application/json")
-            .header("x-api-key", properties.apiKey())
+            .header("x-api-key", apiKey)
             .header("anthropic-version", "2023-06-01")
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
             .build();
@@ -163,14 +169,12 @@ public class AnthropicClient {
         HttpResponse<String> response = httpClient.send(request,
             HttpResponse.BodyHandlers.ofString());
 
-        // 5. 打印响应状态码和响应体
+        // 5. 只记录状态码。上游响应体可能包含敏感信息，不写入日志。
         log.info("API 响应状态码: {}", response.statusCode());
-        log.info("API 响应体前200字: {}",
-            response.body().length() > 200 ? response.body().substring(0, 200) : response.body());
 
         // 6. 检查响应状态码
         if (response.statusCode() != 200) {
-            throw new RuntimeException("API 调用失败，状态码: " + response.statusCode() + ", 响应: " + response.body());
+            throw new RuntimeException("API 调用失败，状态码: " + response.statusCode());
         }
 
         // 7. 解析响应 JSON（加 try-catch 防止格式不兼容）
@@ -178,8 +182,8 @@ public class AnthropicClient {
         try {
             responseJson = objectMapper.readTree(response.body());
         } catch (Exception e) {
-            log.error("JSON 解析失败，响应体: {}", response.body(), e);
-            throw new RuntimeException("JSON 解析失败: " + e.getMessage() + "，响应体: " + response.body(), e);
+            log.error("API 响应 JSON 解析失败", e);
+            throw new RuntimeException("API 响应 JSON 解析失败", e);
         }
 
         // 7. 提取文本内容和工具调用
@@ -258,6 +262,17 @@ public class AnthropicClient {
             String agentMemory,
             Consumer<String> onToken    // 回调函数：token -> { 做什么 }
     ) throws Exception {
+        return chatStream(history, tools, agentMemory, properties.apiKey(), onToken);
+    }
+
+    public AnthropicResponse chatStream(
+            List<Message> history,
+            List<Map<String, Object>> tools,
+            String agentMemory,
+            String apiKey,
+            Consumer<String> onToken
+    ) throws Exception {
+        requireApiKey(apiKey);
 
         // 记录流式 API 调用开始
         long startMs = System.currentTimeMillis();
@@ -287,7 +302,7 @@ public class AnthropicClient {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(properties.apiEndpoint()))
             .header("Content-Type", "application/json")
-            .header("x-api-key", properties.apiKey())
+            .header("x-api-key", apiKey)
             .header("anthropic-version", "2023-06-01")
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
             .build();
@@ -301,6 +316,10 @@ public class AnthropicClient {
         //    ofInputStream() = 返回一个流，可以边收边读
         HttpResponse<InputStream> response = httpClient.send(request,
             HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() != 200) {
+            response.body().close();
+            throw new RuntimeException("API 流式调用失败，状态码: " + response.statusCode());
+        }
 
         // 4. 逐行读取 SSE 事件流
         //    InputStream = 原始字节流（一个字节一个字节读，不方便）
@@ -521,5 +540,14 @@ public class AnthropicClient {
             return null;
         }
         return value.asInt();
+    }
+
+    private void requireApiKey(String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException("请先在网页配置 DeepSeek API Key，或设置 DEEPSEEK_API_KEY 环境变量");
+        }
+        if (apiKey.length() > 512 || apiKey.chars().anyMatch(character -> character < 0x21 || character > 0x7e)) {
+            throw new IllegalStateException("DeepSeek API Key 格式无效");
+        }
     }
 }

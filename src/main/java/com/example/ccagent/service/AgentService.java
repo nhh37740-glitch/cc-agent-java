@@ -58,7 +58,7 @@ public class AgentService {
 
     // ==================== 非流式方法 ====================
     @Async
-    public CompletableFuture<ChatResponse> run(String userMessage, String conversationId) {
+    public CompletableFuture<ChatResponse> run(String userMessage, String conversationId, String apiKey) {
         String activeConversationId = normalizeConversationId(conversationId);
         String turnId = UUID.randomUUID().toString();
 
@@ -87,7 +87,7 @@ public class AgentService {
                     activeConversationId, round + 1, oldMessages.size(), newMessages.size(), apiHistory.size(), describeMessages(apiHistory));
 
                 AnthropicClient.AnthropicResponse response =
-                    anthropicClient.chat(apiHistory, toolDefs, agentMemory);
+                    anthropicClient.chat(apiHistory, toolDefs, agentMemory, 4096, apiKey);
                 totalOutputTokens += response.outputTokens() != null ? response.outputTokens() : 0;
                 sessionStore.updateUsage(activeConversationId, response.inputTokens(), response.outputTokens());
 
@@ -97,7 +97,7 @@ public class AgentService {
                     newMessages.add(new Message("assistant", List.of(new Message.TextBlock(reply))));
                     log.info("准备批量写库，conversationId: {}, turnId: {}, newMessagesCount: {}, totalOutputTokens: {}, newMessages: {}",
                         activeConversationId, turnId, newMessages.size(), totalOutputTokens, describeMessages(newMessages));
-                    sessionStore.appendTurn(activeConversationId, turnId, newMessages, totalOutputTokens, buildCompressor());
+                    sessionStore.appendTurn(activeConversationId, turnId, newMessages, totalOutputTokens, buildCompressor(apiKey));
                     return CompletableFuture.completedFuture(new ChatResponse(activeConversationId, reply));
                 }
 
@@ -142,7 +142,7 @@ public class AgentService {
 
     // ==================== 流式方法 ====================
     @Async
-    public void runStream(String userMessage, String conversationId, SseEmitter emitter) {
+    public void runStream(String userMessage, String conversationId, SseEmitter emitter, String apiKey) {
         String rawConversationId = conversationId;
         String activeConversationId = normalizeConversationId(conversationId);
         String turnId = UUID.randomUUID().toString();
@@ -203,7 +203,7 @@ public class AgentService {
                 ));
 
                 AnthropicClient.AnthropicResponse apiResp =
-                    anthropicClient.chatStream(apiHistory, toolDefs, agentMemory,
+                    anthropicClient.chatStream(apiHistory, toolDefs, agentMemory, apiKey,
                         token -> {
                             try {
                                 // 用 JSON 字符串包装：含真换行的 token 经 JSON 转义后变单行 ASCII+UTF-8，
@@ -236,7 +236,7 @@ public class AgentService {
                         "newMessagesCount", newMessages.size(),
                         "newMessages", describeMessages(newMessages)
                     ));
-                    sessionStore.appendTurn(activeConversationId, turnId, newMessages, totalOutputTokens, buildCompressor());
+                    sessionStore.appendTurn(activeConversationId, turnId, newMessages, totalOutputTokens, buildCompressor(apiKey));
                     streamFlowLogger.write(turnId, activeConversationId, "APPEND_TURN_DONE", debugData(
                         "savedMessagesCount", newMessages.size(),
                         "replyLength", reply.length(),
@@ -394,7 +394,7 @@ public class AgentService {
      * SessionStore 不直接依赖 AnthropicClient，通过这个 lambda 把 LLM 能力注入。
      * 压缩时把老消息拼成文本，加一条"请总结"指令发给 LLM，不带工具，max_tokens=512。
      */
-    private Compressor buildCompressor() {
+    private Compressor buildCompressor(String apiKey) {
         return oldMessages -> {
             // 把老消息序列化成文本
             StringBuilder sb = new StringBuilder();
@@ -422,7 +422,7 @@ public class AgentService {
 
             // 调 LLM，max_tokens=512 限制输出长度，不带工具
             AnthropicClient.AnthropicResponse resp = anthropicClient.chat(
-                summaryRequest, List.of(), "", 512);
+                summaryRequest, List.of(), "", 512, apiKey);
             return resp.text();
         };
     }

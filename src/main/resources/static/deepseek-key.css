@@ -1,0 +1,10 @@
+body { margin: 0; background: #09090f; color: #e5e7eb; font: 16px/1.5 system-ui, sans-serif; }
+[hidden] { display: none !important; }
+main { box-sizing: border-box; max-width: 680px; margin: 8vh auto; padding: 24px; }
+a { color: #a5b4fc; }
+form { display: grid; gap: 12px; margin: 28px 0 16px; }
+input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #52525b; border-radius: 6px; background: #18181b; color: #fff; }
+button { width: fit-content; padding: 10px 16px; border: 0; border-radius: 6px; background: #6366f1; color: #fff; cursor: pointer; }
+#remove-key { background: #3f3f46; }
+.hint { color: #a1a1aa; font-size: 14px; }
+#key-result { min-height: 24px; }

@@ -19,6 +19,8 @@ import com.example.ccagent.model.ChatResponse;
 import com.example.ccagent.model.ConversationSummary;
 import com.example.ccagent.model.Message;
 import com.example.ccagent.service.AgentService;
+import com.example.ccagent.service.DeepSeekKeyService;
+import jakarta.servlet.http.HttpServletRequest;
 import com.example.ccagent.service.SessionStore;
 import com.example.ccagent.service.StreamFlowLogger;
 
@@ -43,6 +45,9 @@ public class ChatController {
     private AgentService agentService;
 
     @Autowired
+    private DeepSeekKeyService deepSeekKeys;
+
+    @Autowired
     private SessionStore sessionStore;
 
     @Autowired
@@ -50,11 +55,11 @@ public class ChatController {
 
     // ==================== 非流式端点 ====================
     @PostMapping("/chat")
-    public CompletableFuture<ChatResponse> chat(@RequestBody ChatRequest request) {
+    public CompletableFuture<ChatResponse> chat(@RequestBody ChatRequest request, HttpServletRequest httpRequest) {
         String userMessage = request.message();
         String conversationId = request.conversationId();
         log.info("收到 POST /api/chat 请求，conversationId: {}, 消息: {}", conversationId, userMessage);
-        return agentService.run(userMessage, conversationId);
+        return agentService.run(userMessage, conversationId, deepSeekKeys.resolve(httpRequest));
     }
 
     // ==================== 流式端点（SSE） ====================
@@ -64,7 +69,8 @@ public class ChatController {
     @GetMapping(value = "/chat/stream", produces = "text/event-stream;charset=UTF-8")
     public SseEmitter chatStream(
             @RequestParam String message,
-            @RequestParam(required = false) String conversationId) {
+            @RequestParam(required = false) String conversationId,
+            HttpServletRequest httpRequest) {
         log.info("收到 GET /api/chat/stream 请求，conversationId: {}, 消息: {}", conversationId, message);
         streamFlowLogger.write("controller", conversationId, "GET_STREAM_REQUEST", Map.of(
             "rawConversationId", conversationId == null ? "" : conversationId,
@@ -72,7 +78,7 @@ public class ChatController {
             "messagePreview", preview(message, 120)
         ));
         SseEmitter emitter = new SseEmitter(300000L);
-        agentService.runStream(message, conversationId, emitter);
+        agentService.runStream(message, conversationId, emitter, deepSeekKeys.resolve(httpRequest));
         return emitter;
     }
 

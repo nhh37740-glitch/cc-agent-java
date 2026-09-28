@@ -34,6 +34,13 @@ agent:
 server:
   # 监听端口
   port: 8080
+  servlet:
+    session:
+      cookie:
+        # 同一站点按路径代理多个 Agent 时避免 JSESSIONID 名称冲突。
+        name: CC_AGENT_JAVA_SESSION
+        http-only: true
+        same-site: strict
 
 # logging 日志配置 —— Spring Boot 内置
 logging:

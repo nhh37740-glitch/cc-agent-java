@@ -13,7 +13,16 @@ Java 17 与 Spring Boot 实现的 DeepSeek Agent 学习项目。页面入口为
 
 Codex 的构建与运行验证在 Linux Jenkins 节点的 Docker 环境中完成，不在本机执行 Gradle 或 `javac`。Jenkins 流水线先运行模块边界检查与 Gradle 构建，归档可运行 Spring Boot JAR 和 `dist/manifest.json`，再构建运行镜像。manifest 记录源码 commit、工作树摘要、工具链版本及 JAR SHA-256。
 
-交付物是一个包含 `agent-contracts` 依赖的可运行应用 JAR，以及该 JAR 的校验清单；目前不单独发布 `agent-contracts` 二进制包。`DEEPSEEK_API_KEY` 只通过部署环境注入，不写入源码或镜像。
+交付物是一个包含 `agent-contracts` 依赖的可运行应用 JAR，以及该 JAR 的校验清单；目前不单独发布 `agent-contracts` 二进制包。`DEEPSEEK_API_KEY` 可作为服务器默认密钥由部署环境注入，不写入源码或镜像。
+
+网页可在 `/agent.html` 打开“DeepSeek API Key”设置页。输入页
+`/deepseek-key.html` 只加载本站 CSS/JS，并仅在 HTTPS 或本机回环地址
+开放密钥输入。密钥保存在当前浏览器的服务端会话内存中，不写入仓库、
+数据库、浏览器存储或 URL。`GET /api/settings/deepseek` 只返回是否配置、
+来源和掩码；`PUT` / `DELETE` 只更改本会话密钥。聊天、流式请求与记忆
+压缩使用同一会话的密钥；未设置或移除网页密钥后使用环境变量默认值。
+服务重启或会话到期后网页密钥失效；多实例部署需要会话亲和或共享的
+安全会话存储。公开入口需要 HTTPS 才能从网页输入密钥。
 
 ## Docker 与 Jenkins
 

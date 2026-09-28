@@ -217,6 +217,13 @@
                 </div>
             </div>
 
+            <!-- DeepSeek 密钥输入页面不加载本调试页的第三方脚本。 -->
+            <div class="bg-gray-900/80 rounded-xl p-5 border border-gray-800 space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200">DeepSeek API Key</h3>
+                <p id="deepseek-key-status" class="text-xs text-gray-400">正在读取配置状态…</p>
+                <a href="deepseek-key.html" class="inline-block text-xs text-brand-400 hover:text-brand-300">设置、替换或移除密钥 →</a>
+            </div>
+
             <!-- 3. 请求头配置 Headers -->
             <div class="bg-gray-900/80 rounded-xl p-5 border border-gray-800 space-y-4">
                 <div class="flex items-center justify-between">
@@ -400,12 +407,29 @@
             document.getElementById('conversation-id').value = currentConversationId;
             updateCurlPreview();
             refreshConversations();
+            refreshDeepSeekKeyStatus();
             
             // 监听输入更改随时更新 curl 预览
             document.getElementById('post-url').addEventListener('input', updateCurlPreview);
             document.getElementById('get-url').addEventListener('input', updateCurlPreview);
             document.getElementById('prompt-input').addEventListener('input', updateCurlPreview);
         });
+
+        async function refreshDeepSeekKeyStatus() {
+            const label = document.getElementById('deepseek-key-status');
+            try {
+                const response = await fetch(`${API_BASE_URL}/settings/deepseek`, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const status = await response.json();
+                const source = status.source === 'browser-session' ? '当前浏览器会话'
+                    : status.source === 'environment' ? '服务器环境变量' : '未配置';
+                label.textContent = status.configured ? `已配置（${source}）：${status.masked}` : '未配置';
+            } catch {
+                label.textContent = '配置状态暂时无法读取';
+            }
+        }
+
+        window.addEventListener('focus', refreshDeepSeekKeyStatus);
 
         function setConversationIdFromInput() {
             currentConversationId = document.getElementById('conversation-id').value.trim();
